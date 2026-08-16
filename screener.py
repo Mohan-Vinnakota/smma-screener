@@ -2,12 +2,15 @@ import pandas as pd
 from SmartApi import SmartConnect
 import pyotp
 import time
-
+import json
 # ── Config ────────────────────────────────────────────────────
-API_KEY   = "EgScLl61"
-CLIENT_ID = "M55253698"
-PASSWORD  = "1998"
-TOTP_KEY  = "JJU4G2L572JI4V6NRNX24KE734"
+with open("credentials.json") as f:
+    creds = json.load(f)
+
+API_KEY   = creds["api_key"]
+CLIENT_ID = creds["client_id"]
+PASSWORD  = creds["password"]
+TOTP_KEY  = creds["totp_key"]
 
 LTP_MIN    = 30
 LTP_MAX    = 500

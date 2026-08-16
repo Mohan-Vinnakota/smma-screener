@@ -1,10 +1,15 @@
 from SmartApi import SmartConnect
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 import pyotp
-API_KEY   = "EgScLl61"
-CLIENT_ID = "M55253698"
-PASSWORD  = "1998"
-TOTP_KEY  = "JJU4G2L572JI4V6NRNX24KE734"
+import json
+
+with open("credentials.json") as f:
+    creds = json.load(f)
+
+API_KEY   = creds["api_key"]
+CLIENT_ID = creds["client_id"]
+PASSWORD  = creds["password"]
+TOTP_KEY  = creds["totp_key"]
 
 api = SmartConnect(api_key=API_KEY)
 totp = pyotp.TOTP(TOTP_KEY).now()
