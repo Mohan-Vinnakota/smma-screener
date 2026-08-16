@@ -1,0 +1,12 @@
+flask
+websockets
+requests
+pandas
+numpy
+xgboost
+scikit-learn
+smartapi-python
+pyotp
+logzero
+websocket-client
+pyinstaller
