@@ -25,7 +25,7 @@ LTP_MAX     = 500
 MIN_BID_QTY = 1_000_000
 MIN_ASK_QTY = 1_000_000
 
-# ── Shared ML model (one instance for all symbols) ────────────
+# ── Shared ML model ───────────────────────────────────────────
 ml = MLModel(min_samples=50)
 
 # ── Per symbol state ──────────────────────────────────────────
@@ -45,7 +45,7 @@ class SymbolState:
         self.ml_verdict     = None
         self.ml_confidence  = None
         self.ml_reason      = ""
-        self.open_trade     = None   # CrossoverRecord of open trade
+        self.open_trade     = None
 
     def on_tick(self, ltp, ltq=1, bid_price=0,
                 bid_qty=0, ask_price=0, ask_qty=0):
@@ -69,11 +69,9 @@ class SymbolState:
             self._handle_signal(signal, ltp, bid_price, ask_price)
 
     def _handle_signal(self, signal, ltp, bid_price, ask_price):
-        # Close open trade first
         if self.open_trade is not None:
             self._close_trade(ltp)
 
-        # Build ML record
         avg_ltq_2m = self.store.avg_ltq(2) or 1
         avg_ltq_5m = self.store.avg_ltq(5) or 1
         etq_5m     = self.store.etq(5)
@@ -113,7 +111,7 @@ class SymbolState:
             signal=signal,
             entry_ltp=ltp,
             predicted=self.ml_verdict,
-            confidence=conf,
+            confidence=round(float(conf), 2),
             reason=reason
         )
 
@@ -151,7 +149,8 @@ class Engine:
         self.jwt_token  = None
         self.symbols    = {}
         self.token_map  = {}
-        init_db() 
+        self._ws_tokens = []    # saved for reconnect
+        init_db()
 
     def login(self):
         self.api   = SmartConnect(api_key=API_KEY)
@@ -198,13 +197,12 @@ class Engine:
 
         print(f"Passed filter: {len(passed)} stocks")
         for s in passed:
-            print(f"Stored symbol: '{s['symbol']}'")
             sym = s["symbol"]
             tok = str(s["token"])
             if sym not in self.symbols:
                 self.symbols[sym] = SymbolState(sym, tok)
-            self.token_map[tok] = sym 
-            save_screened_stock(sym, s["ltp"], s.get("bid_qty", 0), s.get("ask_qty", 0))   
+            self.token_map[tok] = sym
+            save_screened_stock(sym, s["ltp"], s.get("bid_qty", 0), s.get("ask_qty", 0))
         return [s["token"] for s in passed]
 
     def on_tick(self, wsapp, message):
@@ -213,11 +211,9 @@ class Engine:
             ltq   = message.get("last_traded_quantity", 1)
             token = str(message.get("token", ""))
 
-            # Look up symbol by token
             symbol = self.token_map.get(token, "")
             if not symbol:
                 return
-
 
             bid_price = message["best_5_buy_data"][0]["price"] / 100
             bid_qty   = message["best_5_buy_data"][0]["quantity"]
@@ -230,7 +226,12 @@ class Engine:
                 )
         except Exception as e:
             print(f"Tick error: {e}")
+
     def start_websocket(self, tokens):
+        self._ws_tokens = tokens    # save for reconnect
+        self._connect_websocket()
+
+    def _connect_websocket(self):
         sws = SmartWebSocketV2(
             self.jwt_token, API_KEY, CLIENT_ID, self.feed_token
         )
@@ -238,12 +239,23 @@ class Engine:
         def on_open(wsapp):
             print("WebSocket connected!")
             sws.subscribe("engine", 3,
-                          [{"exchangeType": 1, "tokens": tokens}])
+                          [{"exchangeType": 1, "tokens": self._ws_tokens}])
+
+        def on_error(wsapp, error):
+            print(f"WS Error: {error}")
+
+        def on_close(wsapp):
+            print("WS Closed — reconnecting in 5 seconds...")
+            time.sleep(5)
+            try:
+                self._connect_websocket()
+            except Exception as e:
+                print(f"Reconnect failed: {e}")
 
         sws.on_open  = on_open
         sws.on_data  = self.on_tick
-        sws.on_error = lambda ws, e: print(f"WS Error: {e}")
-        sws.on_close = lambda ws: print("WS Closed")
+        sws.on_error = on_error
+        sws.on_close = on_close
         sws.connect()
 
     def get_rows(self):
