@@ -9,6 +9,7 @@ from indicators import CrossoverDetector
 from tick_store import TickStore
 from practice import Tick
 from ml_model import MLModel, CrossoverRecord
+from database import init_db, save_signal, update_signal_exit, save_screened_stock
 
 # ── Config ────────────────────────────────────────────────────
 with open("credentials.json") as f:
@@ -21,8 +22,8 @@ TOTP_KEY  = creds["totp_key"]
 
 LTP_MIN     = 30
 LTP_MAX     = 500
-MIN_BID_QTY = 1_000_100
-MIN_ASK_QTY = 1_000_100
+MIN_BID_QTY = 1_000_000
+MIN_ASK_QTY = 1_000_000
 
 # ── Shared ML model (one instance for all symbols) ────────────
 ml = MLModel(min_samples=50)
@@ -96,16 +97,25 @@ class SymbolState:
 
         pred, conf, reason = ml.predict(record)
         record.predicted   = pred
-        record.confidence  = conf
+        record.confidence  = round(float(conf), 2)
         record.reason      = reason
 
         self.signal        = signal
         self.ml_verdict    = "ACCEPT" if pred else "AVOID"
-        self.ml_confidence = conf
+        self.ml_confidence = round(float(conf), 2)
         self.ml_reason     = reason
         self.open_trade    = record
 
         print(f"🚨 {self.symbol}: {signal} @ ₹{ltp} | {self.ml_verdict} ({conf:.0%}) | {reason}")
+
+        save_signal(
+            symbol=self.symbol,
+            signal=signal,
+            entry_ltp=ltp,
+            predicted=self.ml_verdict,
+            confidence=conf,
+            reason=reason
+        )
 
     def _close_trade(self, exit_ltp):
         trade = self.open_trade
@@ -124,6 +134,14 @@ class SymbolState:
               f"P&L ₹{trade.pnl:.2f} | {result}")
         self.open_trade = None
 
+        update_signal_exit(
+            symbol=self.symbol,
+            signal=trade.signal,
+            exit_ltp=exit_ltp,
+            pnl=trade.pnl,
+            profitable=trade.profitable
+        )
+
 
 # ── Engine ────────────────────────────────────────────────────
 class Engine:
@@ -133,6 +151,7 @@ class Engine:
         self.jwt_token  = None
         self.symbols    = {}
         self.token_map  = {}
+        init_db() 
 
     def login(self):
         self.api   = SmartConnect(api_key=API_KEY)
@@ -184,7 +203,8 @@ class Engine:
             tok = str(s["token"])
             if sym not in self.symbols:
                 self.symbols[sym] = SymbolState(sym, tok)
-            self.token_map[tok] = sym    # ← add this
+            self.token_map[tok] = sym 
+            save_screened_stock(sym, s["ltp"], s.get("bid_qty", 0), s.get("ask_qty", 0))   
         return [s["token"] for s in passed]
 
     def on_tick(self, wsapp, message):

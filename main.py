@@ -2,10 +2,12 @@ import time
 import threading
 from engine import Engine
 from server import start_servers, set_engine
+from database import init_db 
 
 # ── Choose mode ───────────────────────────────────────────────
 import sys
 SIMULATE = "--simulate" in sys.argv
+init_db()
 
 if SIMULATE:
     print("=== SIMULATION MODE ===")
