@@ -1,3 +1,5 @@
+from config import SMMA_FAST, SMMA_SLOW
+
 class SMMACalculator:
     def __init__(self, period):
         self.period = period
@@ -18,8 +20,8 @@ class SMMACalculator:
 
 class CrossoverDetector:
     def __init__(self):
-        self.fast = SMMACalculator(20)
-        self.slow = SMMACalculator(120)
+        self.fast = SMMACalculator(SMMA_FAST)
+        self.slow = SMMACalculator(SMMA_SLOW)
         self._prev_fast = None
         self._prev_slow = None
 

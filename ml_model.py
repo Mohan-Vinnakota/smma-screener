@@ -1,6 +1,8 @@
 import numpy as np
 import pickle
 import os
+from config import ML_MIN_SAMPLES
+from logger import logger
 
 try:
     from xgboost import XGBClassifier
@@ -52,7 +54,7 @@ class CrossoverRecord:
 
 
 class MLModel:
-    def __init__(self, model_path="ml_model.pkl", min_samples=50):
+    def __init__(self, model_path="ml_model.pkl", min_samples=ML_MIN_SAMPLES):
         self.model_path  = model_path
         self.min_samples = min_samples
         self.model       = None
@@ -64,7 +66,7 @@ class MLModel:
         if os.path.exists(self.model_path) and XGB_AVAILABLE:
             with open(self.model_path, "rb") as f:
                 self.model = pickle.load(f)
-            print("ML model loaded from disk")
+            logger.info("ML model loaded from disk")
 
     def _save(self):
         with open(self.model_path, "wb") as f:
@@ -91,7 +93,7 @@ class MLModel:
         )
         self.model.fit(X, y)
         self._save()
-        print(f"Model trained on {len(y)} samples")
+        logger.info(f"Model trained on {len(y)} samples")
 
     def predict(self, record):
         """Returns (prediction, confidence, reason)."""

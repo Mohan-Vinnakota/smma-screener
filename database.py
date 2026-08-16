@@ -1,8 +1,8 @@
 import sqlite3
 import os
 from datetime import datetime
-
-DB_PATH = "smma_screener.db"
+from config import DB_PATH
+from logger import logger
 
 def get_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -44,7 +44,7 @@ def init_db():
 
     conn.commit()
     conn.close()
-    print("Database ready")
+    logger.info("Database ready")
 
 def save_signal(symbol, signal, entry_ltp, exit_ltp=None,
                 pnl=None, profitable=None, predicted=None,

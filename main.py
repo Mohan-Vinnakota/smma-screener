@@ -1,16 +1,22 @@
 import time
 import threading
+import sys
+import logging as _logging
+from logger import logger
 from engine import Engine
 from server import start_servers, set_engine
-from database import init_db 
+from database import init_db
+
+
+# Suppress Flask startup messages
+_logging.getLogger("werkzeug").setLevel(_logging.ERROR)
 
 # ── Choose mode ───────────────────────────────────────────────
-import sys
 SIMULATE = "--simulate" in sys.argv
 init_db()
 
 if SIMULATE:
-    print("=== SIMULATION MODE ===")
+    logger.info("=== SIMULATION MODE ===")
     from indicators import CrossoverDetector
     from engine import SymbolState
 
@@ -69,10 +75,10 @@ if SIMULATE:
             time.sleep(0.5)
 
     threading.Thread(target=simulate, daemon=True).start()
-    print(f"Simulating {len(demo_stocks)} stocks...")
+    logger.info(f"Simulating {len(demo_stocks)} stocks...")
 
 else:
-    print("=== LIVE MODE ===")
+    logger.info("=== LIVE MODE ===")
     engine = Engine()
     threading.Thread(target=engine.run, daemon=True).start()
 
@@ -80,11 +86,10 @@ else:
 set_engine(engine)
 start_servers()
 
-print("Dashboard → http://127.0.0.1:5000")
-print("Press Ctrl+C to stop")
+logger.info("Press Ctrl+C to stop")
 
 try:
     while True:
         time.sleep(1)
 except KeyboardInterrupt:
-    print("Stopped")
+    logger.info("Stopped")

@@ -10,6 +10,11 @@ from tick_store import TickStore
 from practice import Tick
 from ml_model import MLModel, CrossoverRecord
 from database import init_db, save_signal, update_signal_exit, save_screened_stock
+from logger import logger
+from config import (
+    LTP_MIN, LTP_MAX, MIN_BID_QTY, MIN_ASK_QTY,
+    TICK_STORE_MINUTES, NSE_SYMBOL_FILE, WS_RECONNECT_DELAY
+)
 
 # ── Config ────────────────────────────────────────────────────
 with open("credentials.json") as f:
@@ -20,10 +25,6 @@ CLIENT_ID = creds["client_id"]
 PASSWORD  = creds["password"]
 TOTP_KEY  = creds["totp_key"]
 
-LTP_MIN     = 30
-LTP_MAX     = 500
-MIN_BID_QTY = 1_000_000
-MIN_ASK_QTY = 1_000_000
 
 # ── Shared ML model ───────────────────────────────────────────
 ml = MLModel(min_samples=50)
@@ -104,7 +105,7 @@ class SymbolState:
         self.ml_reason     = reason
         self.open_trade    = record
 
-        print(f"🚨 {self.symbol}: {signal} @ ₹{ltp} | {self.ml_verdict} ({conf:.0%}) | {reason}")
+        logger.info(f"🚨 SIGNAL {self.symbol}: {signal} @ ₹{ltp} | {self.ml_verdict} ({conf:.0%})")
 
         save_signal(
             symbol=self.symbol,
@@ -127,9 +128,9 @@ class SymbolState:
         ml.record_outcome(trade)
 
         result = "WIN ✅" if trade.profitable else "LOSS ❌"
-        print(f"📊 {self.symbol}: CLOSED {trade.signal} | "
-              f"Entry ₹{trade.entry_ltp} → Exit ₹{exit_ltp} | "
-              f"P&L ₹{trade.pnl:.2f} | {result}")
+        logger.info(f"📊 CLOSED {self.symbol} {trade.signal} | "
+            f"Entry ₹{trade.entry_ltp} → Exit ₹{exit_ltp} | "
+            f"P&L ₹{trade.pnl:.2f} | {result}")
         self.open_trade = None
 
         update_signal_exit(
@@ -159,9 +160,9 @@ class Engine:
         if data["status"]:
             self.jwt_token  = data["data"]["jwtToken"]
             self.feed_token = self.api.getfeedToken()
-            print("Login successful!")
+            logger.info("Login successful!")
             return True
-        print(f"Login failed: {data}")
+        logger.error(f"Login failed: {data}")
         return False
 
     def screen(self):
@@ -169,7 +170,7 @@ class Engine:
         token_list = df["token"].astype(str).tolist()
         passed     = []
 
-        print("Screening stocks...")
+        logger.info("Screening stocks...")
         for i in range(0, len(token_list), 50):
             batch = token_list[i:i+50]
             try:
@@ -192,10 +193,10 @@ class Engine:
                                     "ask_qty": ask_qty,
                                 })
             except Exception as e:
-                print(f"Batch error: {e}")
+                logger.error(f"Batch error: {e}")
             time.sleep(0.1)
 
-        print(f"Passed filter: {len(passed)} stocks")
+        logger.info(f"Passed filter: {len(passed)} stocks")
         for s in passed:
             sym = s["symbol"]
             tok = str(s["token"])
@@ -225,7 +226,7 @@ class Engine:
                     ltp, ltq, bid_price, bid_qty, ask_price, ask_qty
                 )
         except Exception as e:
-            print(f"Tick error: {e}")
+            logger.error(f"Tick error: {e}")
 
     def start_websocket(self, tokens):
         self._ws_tokens = tokens    # save for reconnect
@@ -237,20 +238,20 @@ class Engine:
         )
 
         def on_open(wsapp):
-            print("WebSocket connected!")
+            logger.info("WebSocket connected!")
             sws.subscribe("engine", 3,
                           [{"exchangeType": 1, "tokens": self._ws_tokens}])
 
         def on_error(wsapp, error):
-            print(f"WS Error: {error}")
+            logger.error(f"WS Error: {error}")
 
         def on_close(wsapp):
-            print("WS Closed — reconnecting in 5 seconds...")
+            logger.warning("WS Closed — reconnecting in 5 seconds...")
             time.sleep(5)
             try:
                 self._connect_websocket()
             except Exception as e:
-                print(f"Reconnect failed: {e}")
+                logger.error(f"Reconnect failed: {e}")
 
         sws.on_open  = on_open
         sws.on_data  = self.on_tick

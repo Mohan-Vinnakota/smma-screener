@@ -3,11 +3,13 @@ import asyncio
 import threading
 import websockets
 from flask import Flask, jsonify, send_from_directory
-import os
+from config import HTTP_HOST, HTTP_PORT, WS_HOST, WS_PORT
+from logger import logger
+import logging as _logging
+_logging.getLogger("werkzeug").setLevel(_logging.ERROR)
 
 app = Flask(__name__)
-
-_engine = None   # will be set by main.py
+_engine = None
 
 def set_engine(engine):
     global _engine
@@ -26,8 +28,12 @@ def api_rows():
 
 # ── Flask thread ──────────────────────────────────────────────
 def run_flask():
-    print("Dashboard → http://127.0.0.1:5000")
-    app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)
+    logger.info(f"Dashboard → http://{HTTP_HOST}:{HTTP_PORT}")
+    import logging as _logging
+    log = _logging.getLogger("werkzeug")
+    log.setLevel(_logging.ERROR)
+    log.disabled = True
+    app.run(host=HTTP_HOST, port=HTTP_PORT, debug=False, use_reloader=False)
 
 # ── WebSocket broadcast ───────────────────────────────────────
 _clients = set()
@@ -54,8 +60,8 @@ async def broadcast_loop():
                 dead.add(ws)
         _clients -= dead
 async def ws_main():
-    async with websockets.serve(ws_handler, "127.0.0.1", 8765):
-        print("WebSocket → ws://127.0.0.1:8765")
+    async with websockets.serve(ws_handler, WS_HOST, WS_PORT):
+        logger.info(f"WebSocket → ws://{WS_HOST}:{WS_PORT}")
         await broadcast_loop()
 
 def run_websocket():
