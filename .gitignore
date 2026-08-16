@@ -1,0 +1,10 @@
+credentials.json
+venv/
+__pycache__/
+*.pkl
+*.log
+logs/
+*.exe
+dist/
+build/
+*.spec

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>SMMA Screener</title>
+  <style>
+    body {
+      background: #0b0e14;
+      color: #e2e8f0;
+      font-family: monospace;
+      padding: 20px;
+      font-size: 12px;
+    }
+    h1 { color: #00d4aa; margin-bottom: 6px; }
+    .status { font-size: 12px; color: #718096; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      background: #181d28;
+      padding: 8px 10px;
+      text-align: left;
+      color: #718096;
+      font-size: 10px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #1e2535;
+      white-space: nowrap;
+    }
+    tr:hover { background: #181d28; }
+    .buy    { color: #00d4aa; font-weight: bold; }
+    .sell   { color: #ff4d6a; font-weight: bold; }
+    .accept { color: #00d4aa; font-weight: bold; }
+    .avoid  { color: #ff4d6a; font-weight: bold; }
+    .dim    { color: #4a5568; }
+    .reason {
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #718096;
+    }
+  </style>
+</head>
+<body>
+  <h1>SMMA Screener — Live</h1>
+  <div class="status" id="status">Connecting...</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>LTP ₹</th>
+        <th>Bid ₹</th>
+        <th>Bid Qty</th>
+        <th>Ask ₹</th>
+        <th>Ask Qty</th>
+        <th>SMMA(20)</th>
+        <th>SMMA(120)</th>
+        <th>ETQ 5m</th>
+        <th>ETQ 20m</th>
+        <th>ETQ 60m</th>
+        <th>Avg LTP 20m</th>
+        <th>Avg LTP 60m</th>
+        <th>Signal</th>
+        <th>ML Verdict</th>
+        <th>Confidence</th>
+        <th>Reason</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+<script>
+  const ws = new WebSocket("ws://127.0.0.1:8765");
+
+  ws.onopen = () => {
+    document.getElementById("status").innerHTML = "🟢 Live";
+  };
+
+  ws.onmessage = (event) => {
+    const rows = JSON.parse(event.data);
+    const tbody = document.getElementById("tbody");
+    tbody.innerHTML = "";
+
+    rows.forEach(r => {
+      const sigClass = r.signal === "BUY" ? "buy"
+                     : r.signal === "SELL" ? "sell" : "dim";
+
+      const mlClass  = r.ml_verdict === "ACCEPT" ? "accept"
+                     : r.ml_verdict === "AVOID"  ? "avoid"  : "dim";
+
+      tbody.innerHTML += `<tr>
+        <td><b>${r.symbol}</b></td>
+        <td>${r.ltp ?? "—"}</td>
+        <td>${r.bid_price ?? "—"}</td>
+        <td>${(r.bid_qty ?? 0).toLocaleString()}</td>
+        <td>${r.ask_price ?? "—"}</td>
+        <td>${(r.ask_qty ?? 0).toLocaleString()}</td>
+        <td>${r.smma_fast ?? "—"}</td>
+        <td>${r.smma_slow ?? "—"}</td>
+        <td>${(r.etq_5m ?? 0).toLocaleString()}</td>
+        <td>${(r.etq_20m ?? 0).toLocaleString()}</td>
+        <td>${(r.etq_60m ?? 0).toLocaleString()}</td>
+        <td>${r.avg_ltp_20m ?? "—"}</td>
+        <td>${r.avg_ltp_60m ?? "—"}</td>
+        <td class="${sigClass}">${r.signal ?? "—"}</td>
+        <td class="${mlClass}">${r.ml_verdict ?? "—"}</td>
+        <td>${r.ml_conf ?? "—"}</td>
+        <td class="reason" title="${r.ml_reason ?? ""}">${r.ml_reason ?? "—"}</td>
+      </tr>`;
+    });
+  };
+
+  ws.onclose = () => {
+    document.getElementById("status").innerHTML = "🔴 Disconnected";
+    setTimeout(() => location.reload(), 3000);
+  };
+</script>
+</body>
+</html>
