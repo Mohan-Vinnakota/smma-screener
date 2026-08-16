@@ -5,6 +5,7 @@ import websockets
 from flask import Flask, jsonify, send_from_directory
 from config import HTTP_HOST, HTTP_PORT, WS_HOST, WS_PORT
 from logger import logger
+from database import get_all_signals
 import logging as _logging
 _logging.getLogger("werkzeug").setLevel(_logging.ERROR)
 
@@ -21,6 +22,11 @@ def index():
     return send_from_directory("dashboard", "index.html")
 
 @app.route("/api/rows")
+@app.route("/api/signals")
+
+def api_signals():
+    return jsonify(get_all_signals())
+
 def api_rows():
     if _engine is None:
         return jsonify([])

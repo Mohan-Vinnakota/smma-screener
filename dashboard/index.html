@@ -12,8 +12,9 @@
       font-size: 12px;
     }
     h1 { color: #00d4aa; margin-bottom: 6px; }
+    h2 { color: #00d4aa; margin-top: 30px; margin-bottom: 10px; }
     .status { font-size: 12px; color: #718096; margin-bottom: 12px; }
-    table { width: 100%; border-collapse: collapse; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
     th {
       background: #181d28;
       padding: 8px 10px;
@@ -40,11 +41,21 @@
       text-overflow: ellipsis;
       color: #718096;
     }
+    .pnl-summary {
+      background: #181d28;
+      padding: 12px 16px;
+      border-radius: 6px;
+      margin: 20px 0 10px 0;
+      font-size: 13px;
+      color: #718096;
+    }
   </style>
 </head>
 <body>
   <h1>SMMA Screener — Live</h1>
   <div class="status" id="status">Connecting...</div>
+
+  <!-- Live Screener Table -->
   <table>
     <thead>
       <tr>
@@ -70,7 +81,32 @@
     <tbody id="tbody"></tbody>
   </table>
 
+  <!-- P&L Summary -->
+  <div class="pnl-summary" id="pnl-summary">
+    Loading P&L summary...
+  </div>
+
+  <!-- Signal History Table -->
+  <h2>Signal History</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Symbol</th>
+        <th>Signal</th>
+        <th>Entry ₹</th>
+        <th>Exit ₹</th>
+        <th>P&L ₹</th>
+        <th>Result</th>
+        <th>ML Verdict</th>
+        <th>Confidence</th>
+      </tr>
+    </thead>
+    <tbody id="signal-tbody"></tbody>
+  </table>
+
 <script>
+  // ── WebSocket for live screener ────────────────────────────
   const ws = new WebSocket("ws://127.0.0.1:8765");
 
   ws.onopen = () => {
@@ -83,11 +119,10 @@
     tbody.innerHTML = "";
 
     rows.forEach(r => {
-      const sigClass = r.signal === "BUY" ? "buy"
+      const sigClass = r.signal === "BUY"  ? "buy"
                      : r.signal === "SELL" ? "sell" : "dim";
-
       const mlClass  = r.ml_verdict === "ACCEPT" ? "accept"
-                     : r.ml_verdict === "AVOID"  ? "avoid"  : "dim";
+                     : r.ml_verdict === "AVOID"  ? "avoid" : "dim";
 
       tbody.innerHTML += `<tr>
         <td><b>${r.symbol}</b></td>
@@ -115,6 +150,67 @@
     document.getElementById("status").innerHTML = "🔴 Disconnected";
     setTimeout(() => location.reload(), 3000);
   };
+
+  // ── Signal history + P&L summary ──────────────────────────
+  async function loadSignals() {
+    try {
+      const resp    = await fetch("/api/signals");
+      const signals = await resp.json();
+      const tbody   = document.getElementById("signal-tbody");
+      tbody.innerHTML = "";
+
+      // P&L summary
+      const closed   = signals.filter(s => s.pnl !== null);
+      const wins     = closed.filter(s => s.profitable === 1).length;
+      const losses   = closed.filter(s => s.profitable === 0).length;
+      const open     = signals.filter(s => s.pnl === null).length;
+      const totalPnl = closed.reduce((sum, s) => sum + s.pnl, 0);
+      const winRate  = closed.length > 0
+                     ? ((wins / closed.length) * 100).toFixed(1)
+                     : 0;
+
+      document.getElementById("pnl-summary").innerHTML = `
+        Total Signals: <b>${signals.length}</b> &nbsp;|&nbsp;
+        Closed: <b>${closed.length}</b> &nbsp;|&nbsp;
+        Open: <b>${open}</b> &nbsp;|&nbsp;
+        Wins: <span class="buy"><b>${wins}</b></span> &nbsp;|&nbsp;
+        Losses: <span class="sell"><b>${losses}</b></span> &nbsp;|&nbsp;
+        Win Rate: <b>${winRate}%</b> &nbsp;|&nbsp;
+        Total P&L: <span class="${totalPnl >= 0 ? 'buy' : 'sell'}">
+        <b>₹${totalPnl.toFixed(2)}</b></span>
+      `;
+
+      // Signal rows
+      signals.forEach(s => {
+        const pnlClass = s.pnl === null   ? ""
+                       : s.pnl >= 0       ? "buy" : "sell";
+        const result   = s.profitable === 1 ? "✅ WIN"
+                       : s.profitable === 0 ? "❌ LOSS" : "⏳ Open";
+        const sigClass = s.signal === "BUY" ? "buy" : "sell";
+        const mlClass  = s.predicted === "ACCEPT" ? "accept" : "avoid";
+        const conf     = s.confidence !== null
+                       ? (s.confidence * 100).toFixed(0) + "%" : "—";
+
+        tbody.innerHTML += `<tr>
+          <td>${s.timestamp}</td>
+          <td><b>${s.symbol}</b></td>
+          <td class="${sigClass}">${s.signal}</td>
+          <td>${s.entry_ltp}</td>
+          <td>${s.exit_ltp ?? "—"}</td>
+          <td class="${pnlClass}">${s.pnl !== null ? s.pnl.toFixed(2) : "—"}</td>
+          <td>${result}</td>
+          <td class="${mlClass}">${s.predicted ?? "—"}</td>
+          <td>${conf}</td>
+        </tr>`;
+      });
+
+    } catch(e) {
+      console.error("Signal fetch error:", e);
+    }
+  }
+
+  setInterval(loadSignals, 5000);
+  loadSignals();
 </script>
 </body>
 </html>
