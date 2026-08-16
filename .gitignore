@@ -8,3 +8,4 @@ logs/
 dist/
 build/
 *.spec
+smma_screener.db
