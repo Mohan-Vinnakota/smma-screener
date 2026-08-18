@@ -2,257 +2,408 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>SMMA Screener</title>
   <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
       background: #0b0e14;
       color: #e2e8f0;
       font-family: monospace;
-      padding: 20px;
       font-size: 12px;
+      padding: 16px;
     }
-    h1 { color: #00d4aa; margin-bottom: 6px; }
-    h2 { color: #00d4aa; margin-top: 30px; margin-bottom: 10px; }
-    .status { font-size: 12px; color: #718096; margin-bottom: 12px; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+
+    /* ── Header ──────────────────────────────────────────── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    h1 { color: #00d4aa; font-size: 18px; }
+    .status-badge {
+      padding: 3px 10px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: bold;
+    }
+    .status-live       { background: #003d30; color: #00d4aa; }
+    .status-connecting { background: #2d2200; color: #f6c90e; }
+    .status-dead       { background: #2d0010; color: #ff4d6a; }
+
+    /* ── Controls row ────────────────────────────────────── */
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .controls label { color: #718096; cursor: pointer; }
+
+    /* ── Tabs ────────────────────────────────────────────── */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid #1e2535;
+      padding-bottom: 0;
+    }
+    .tab {
+      padding: 7px 20px;
+      cursor: pointer;
+      color: #4a5568;
+      border-bottom: 2px solid transparent;
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 0.5px;
+      transition: color 0.15s;
+    }
+    .tab:hover { color: #a0aec0; }
+    .tab.active { color: #00d4aa; border-bottom-color: #00d4aa; }
+
+    /* ── Market badge ────────────────────────────────────── */
+    .badge {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: bold;
+      letter-spacing: 0.5px;
+    }
+    .badge-nse { background: #002a40; color: #38bdf8; }
+    .badge-mcx { background: #2d1a00; color: #f6ad55; }
+
+    /* ── P&L summary bar ─────────────────────────────────── */
+    .pnl-bar {
+      background: #181d28;
+      padding: 10px 16px;
+      border-radius: 6px;
+      margin-bottom: 14px;
+      color: #718096;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .pnl-bar span { white-space: nowrap; }
+
+    /* ── Section heading ─────────────────────────────────── */
+    h2 { color: #00d4aa; margin: 20px 0 10px; font-size: 13px; }
+
+    /* ── Tables ──────────────────────────────────────────── */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 900px; }
     th {
       background: #181d28;
-      padding: 8px 10px;
+      padding: 7px 10px;
       text-align: left;
-      color: #718096;
+      color: #4a5568;
       font-size: 10px;
       text-transform: uppercase;
       white-space: nowrap;
     }
     td {
-      padding: 8px 10px;
-      border-bottom: 1px solid #1e2535;
+      padding: 7px 10px;
+      border-bottom: 1px solid #1a2030;
       white-space: nowrap;
     }
-    tr:hover { background: #181d28; }
+    tr:hover td { background: #141824; }
+
+    /* ── Value colours ───────────────────────────────────── */
     .buy    { color: #00d4aa; font-weight: bold; }
     .sell   { color: #ff4d6a; font-weight: bold; }
     .accept { color: #00d4aa; font-weight: bold; }
     .avoid  { color: #ff4d6a; font-weight: bold; }
     .dim    { color: #4a5568; }
     .reason {
-      max-width: 200px;
+      max-width: 180px;
       overflow: hidden;
       text-overflow: ellipsis;
       color: #718096;
     }
-    .pnl-summary {
-      background: #181d28;
-      padding: 12px 16px;
-      border-radius: 6px;
-      margin: 20px 0 10px 0;
-      font-size: 13px;
-      color: #718096;
-    }
+
+    /* ── Rescreen status ─────────────────────────────────── */
+    .rescreen { color: #4a5568; font-size: 11px; margin-bottom: 10px; }
+
+    /* ── Empty state ─────────────────────────────────────── */
+    .empty { color: #4a5568; padding: 20px 0; text-align: center; }
   </style>
 </head>
 <body>
-  <h1>SMMA Screener — Live</h1>
-  <div class="status" id="status">Connecting...</div>
-  <div class="status" id="rescreen-status"></div>
 
-  <!-- Sound toggle -->
-  <div style="margin-bottom:12px;">
-    <label style="color:#718096; cursor:pointer;">
-      <input type="checkbox" id="sound-toggle" checked style="margin-right:6px;">
+  <!-- Header -->
+  <div class="header">
+    <h1>SMMA Screener</h1>
+    <span class="status-badge status-connecting" id="ws-status">Connecting…</span>
+    <span style="color:#4a5568; font-size:11px;" id="counts"></span>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <label>
+      <input type="checkbox" id="sound-toggle" checked style="margin-right:5px;">
       🔔 Sound alerts
     </label>
+    <span class="rescreen" id="rescreen-status"></span>
   </div>
 
-  <!-- Live Screener Table -->
-  <table>
-    <thead>
-      <tr>
-        <th>Symbol</th>
-        <th>LTP ₹</th>
-        <th>Bid ₹</th>
-        <th>Bid Qty</th>
-        <th>Ask ₹</th>
-        <th>Ask Qty</th>
-        <th>SMMA(20)</th>
-        <th>SMMA(120)</th>
-        <th>ETQ 5m</th>
-        <th>ETQ 20m</th>
-        <th>ETQ 60m</th>
-        <th>Avg LTP 20m</th>
-        <th>Avg LTP 60m</th>
-        <th>Signal</th>
-        <th>ML Verdict</th>
-        <th>Confidence</th>
-        <th>Reason</th>
-      </tr>
-    </thead>
-    <tbody id="tbody"></tbody>
-  </table>
+  <!-- Market Tabs -->
+  <div class="tabs">
+    <div class="tab active" data-tab="ALL"  onclick="switchTab('ALL')">All Markets</div>
+    <div class="tab"        data-tab="NSE"  onclick="switchTab('NSE')">NSE Equity</div>
+    <div class="tab"        data-tab="MCX"  onclick="switchTab('MCX')">MCX Commodities</div>
+  </div>
 
   <!-- P&L Summary -->
-  <div class="pnl-summary" id="pnl-summary">
-    Loading P&L summary...
+  <div class="pnl-bar" id="pnl-summary">Loading P&L…</div>
+
+  <!-- Live Screener -->
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Mkt</th>
+          <th>Symbol</th>
+          <th>LTP ₹</th>
+          <th>Bid ₹</th>
+          <th>Bid Qty</th>
+          <th>Ask ₹</th>
+          <th>Ask Qty</th>
+          <th>SMMA(20)</th>
+          <th>SMMA(120)</th>
+          <th>ETQ 5m</th>
+          <th>ETQ 20m</th>
+          <th>ETQ 60m</th>
+          <th>Avg LTP 20m</th>
+          <th>Avg LTP 60m</th>
+          <th>Signal</th>
+          <th>ML Verdict</th>
+          <th>Conf</th>
+          <th>Reason</th>
+        </tr>
+      </thead>
+      <tbody id="live-tbody"></tbody>
+    </table>
   </div>
 
-  <!-- Signal History Table -->
+  <!-- Signal History -->
   <h2>Signal History</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Time</th>
-        <th>Symbol</th>
-        <th>Signal</th>
-        <th>Entry ₹</th>
-        <th>Exit ₹</th>
-        <th>P&L ₹</th>
-        <th>Result</th>
-        <th>ML Verdict</th>
-        <th>Confidence</th>
-      </tr>
-    </thead>
-    <tbody id="signal-tbody"></tbody>
-  </table>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Mkt</th>
+          <th>Symbol</th>
+          <th>Signal</th>
+          <th>Entry ₹</th>
+          <th>Exit ₹</th>
+          <th>P&L ₹</th>
+          <th>Result</th>
+          <th>ML</th>
+          <th>Conf</th>
+        </tr>
+      </thead>
+      <tbody id="signal-tbody"></tbody>
+    </table>
+  </div>
 
 <script>
-  // ── Sound alert ───────────────────────────────────────────
-  let lastSignalCount = 0;
+// ── State ─────────────────────────────────────────────────────
+let allRows        = [];
+let lastSigCount   = 0;
+let activeTab      = "ALL";
 
-  function playAlert(type) {
-    if (!document.getElementById("sound-toggle").checked) return;
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    // BUY = higher pitch, SELL = lower pitch
-    osc.frequency.value = type === "BUY" ? 880 : 440;
-    osc.type = "sine";
-    gain.gain.setValueAtTime(0.3, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.6);
+// ── Tab switching ─────────────────────────────────────────────
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll(".tab").forEach(el => {
+    el.classList.toggle("active", el.dataset.tab === tab);
+  });
+  renderLive();
+}
+
+function filterRows(rows) {
+  if (activeTab === "ALL") return rows;
+  return rows.filter(r => r.market === activeTab);
+}
+
+// ── Market badge HTML ─────────────────────────────────────────
+function badge(market) {
+  const cls = market === "MCX" ? "badge-mcx" : "badge-nse";
+  return `<span class="badge ${cls}">${market}</span>`;
+}
+
+// ── Sound alert ───────────────────────────────────────────────
+function playAlert(type, market) {
+  if (!document.getElementById("sound-toggle").checked) return;
+  const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+  const osc  = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+
+  // NSE: BUY=880Hz SELL=440Hz  |  MCX: BUY=1100Hz SELL=330Hz (different pitch to tell apart)
+  if (market === "MCX") {
+    osc.frequency.value = type === "BUY" ? 1100 : 330;
+  } else {
+    osc.frequency.value = type === "BUY" ? 880  : 440;
   }
+  osc.type = "sine";
+  gain.gain.setValueAtTime(0.3, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.7);
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + 0.7);
+}
 
-  // ── WebSocket for live screener ────────────────────────────
-  const ws = new WebSocket("ws://127.0.0.1:8765");
+// ── Render live screener ──────────────────────────────────────
+function renderLive() {
+  const rows   = filterRows(allRows);
+  const tbody  = document.getElementById("live-tbody");
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="18" class="empty">No data yet — waiting for ticks…</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const sigClass = r.signal === "BUY"  ? "buy"
+                   : r.signal === "SELL" ? "sell" : "dim";
+    const mlClass  = r.ml_verdict === "ACCEPT" ? "accept"
+                   : r.ml_verdict === "AVOID"  ? "avoid" : "dim";
+    return `<tr>
+      <td>${badge(r.market)}</td>
+      <td><b>${r.symbol}</b></td>
+      <td>${r.ltp ?? "—"}</td>
+      <td>${r.bid_price ?? "—"}</td>
+      <td>${(r.bid_qty ?? 0).toLocaleString()}</td>
+      <td>${r.ask_price ?? "—"}</td>
+      <td>${(r.ask_qty ?? 0).toLocaleString()}</td>
+      <td>${r.smma_fast ?? "—"}</td>
+      <td>${r.smma_slow ?? "—"}</td>
+      <td>${(r.etq_5m  ?? 0).toLocaleString()}</td>
+      <td>${(r.etq_20m ?? 0).toLocaleString()}</td>
+      <td>${(r.etq_60m ?? 0).toLocaleString()}</td>
+      <td>${r.avg_ltp_20m ?? "—"}</td>
+      <td>${r.avg_ltp_60m ?? "—"}</td>
+      <td class="${sigClass}">${r.signal ?? "—"}</td>
+      <td class="${mlClass}">${r.ml_verdict ?? "—"}</td>
+      <td>${r.ml_conf ?? "—"}</td>
+      <td class="reason" title="${r.ml_reason ?? ""}">${r.ml_reason ?? "—"}</td>
+    </tr>`;
+  }).join("");
+}
 
-  ws.onopen = () => {
-    document.getElementById("status").innerHTML = "🟢 Live";
-  };
+// ── WebSocket for live rows ───────────────────────────────────
+const ws = new WebSocket("ws://127.0.0.1:8765");
 
-  ws.onmessage = (event) => {
-    const rows = JSON.parse(event.data);
-    const tbody = document.getElementById("tbody");
-    tbody.innerHTML = "";
+ws.onopen = () => {
+  const el = document.getElementById("ws-status");
+  el.textContent = "🟢 Live";
+  el.className = "status-badge status-live";
+};
 
-    rows.forEach(r => {
-      const sigClass = r.signal === "BUY"  ? "buy"
-                     : r.signal === "SELL" ? "sell" : "dim";
-      const mlClass  = r.ml_verdict === "ACCEPT" ? "accept"
-                     : r.ml_verdict === "AVOID"  ? "avoid" : "dim";
+ws.onmessage = (event) => {
+  allRows = JSON.parse(event.data);
 
-      tbody.innerHTML += `<tr>
-        <td><b>${r.symbol}</b></td>
-        <td>${r.ltp ?? "—"}</td>
-        <td>${r.bid_price ?? "—"}</td>
-        <td>${(r.bid_qty ?? 0).toLocaleString()}</td>
-        <td>${r.ask_price ?? "—"}</td>
-        <td>${(r.ask_qty ?? 0).toLocaleString()}</td>
-        <td>${r.smma_fast ?? "—"}</td>
-        <td>${r.smma_slow ?? "—"}</td>
-        <td>${(r.etq_5m ?? 0).toLocaleString()}</td>
-        <td>${(r.etq_20m ?? 0).toLocaleString()}</td>
-        <td>${(r.etq_60m ?? 0).toLocaleString()}</td>
-        <td>${r.avg_ltp_20m ?? "—"}</td>
-        <td>${r.avg_ltp_60m ?? "—"}</td>
-        <td class="${sigClass}">${r.signal ?? "—"}</td>
-        <td class="${mlClass}">${r.ml_verdict ?? "—"}</td>
-        <td>${r.ml_conf ?? "—"}</td>
-        <td class="reason" title="${r.ml_reason ?? ""}">${r.ml_reason ?? "—"}</td>
-      </tr>`;
-    });
-  };
+  // Update tab count badges
+  const nseCount = allRows.filter(r => r.market === "NSE").length;
+  const mcxCount = allRows.filter(r => r.market === "MCX").length;
+  document.getElementById("counts").textContent =
+    `NSE: ${nseCount}  |  MCX: ${mcxCount}`;
 
-  ws.onclose = () => {
-    document.getElementById("status").innerHTML = "🔴 Disconnected";
-    setTimeout(() => location.reload(), 3000);
-  };
+  renderLive();
+};
 
-  // ── Signal history + P&L summary ──────────────────────────
-  async function loadSignals() {
-    try {
-      const resp    = await fetch("/api/signals");
-      const signals = await resp.json();
-      const tbody   = document.getElementById("signal-tbody");
-      tbody.innerHTML = "";
+ws.onclose = () => {
+  const el = document.getElementById("ws-status");
+  el.textContent = "🔴 Disconnected";
+  el.className = "status-badge status-dead";
+  setTimeout(() => location.reload(), 3000);
+};
 
-      // P&L summary
-      const closed   = signals.filter(s => s.pnl !== null);
-      const wins     = closed.filter(s => s.profitable === 1).length;
-      const losses   = closed.filter(s => s.profitable === 0).length;
-      const open     = signals.filter(s => s.pnl === null).length;
-      const totalPnl = closed.reduce((sum, s) => sum + s.pnl, 0);
-      const winRate  = closed.length > 0
-                     ? ((wins / closed.length) * 100).toFixed(1)
-                     : 0;
+// ── Signal history + P&L ──────────────────────────────────────
+async function loadSignals() {
+  try {
+    const resp    = await fetch("/api/signals");
+    const signals = await resp.json();
 
-      document.getElementById("pnl-summary").innerHTML = `
-        Total Signals: <b>${signals.length}</b> &nbsp;|&nbsp;
-        Closed: <b>${closed.length}</b> &nbsp;|&nbsp;
-        Open: <b>${open}</b> &nbsp;|&nbsp;
-        Wins: <span class="buy"><b>${wins}</b></span> &nbsp;|&nbsp;
-        Losses: <span class="sell"><b>${losses}</b></span> &nbsp;|&nbsp;
-        Win Rate: <b>${winRate}%</b> &nbsp;|&nbsp;
-        Total P&L: <span class="${totalPnl >= 0 ? 'buy' : 'sell'}">
-        <b>₹${totalPnl.toFixed(2)}</b></span>
-      `;
+    // ── P&L summary ──────────────────────────────────────────
+    const closed   = signals.filter(s => s.pnl !== null);
+    const wins     = closed.filter(s => s.profitable === 1).length;
+    const losses   = closed.filter(s => s.profitable === 0).length;
+    const open     = signals.filter(s => s.pnl === null).length;
+    const totalPnl = closed.reduce((sum, s) => sum + s.pnl, 0);
+    const winRate  = closed.length > 0
+                   ? ((wins / closed.length) * 100).toFixed(1) : "0.0";
 
-      // Sound alert on new signal
-      if (signals.length > lastSignalCount && lastSignalCount > 0) {
-        const newest = signals[0];
-        playAlert(newest.signal);
-      }
-      lastSignalCount = signals.length;
+    const nseTotal = signals.filter(s => s.market === "NSE").length;
+    const mcxTotal = signals.filter(s => s.market === "MCX").length;
 
-      // Update rescreen status
-      const rescreenEl = document.getElementById("rescreen-status");
-      if (rescreenEl) {
-        const now = new Date();
-        rescreenEl.innerHTML = `Last refreshed: ${now.toLocaleTimeString()} | Next rescreen: ~30 min`;
-      }
+    document.getElementById("pnl-summary").innerHTML = `
+      <span>Signals: <b>${signals.length}</b></span>
+      <span>NSE: <b>${nseTotal}</b></span>
+      <span>MCX: <b>${mcxTotal}</b></span>
+      <span>Closed: <b>${closed.length}</b></span>
+      <span>Open: <b>${open}</b></span>
+      <span>Wins: <span class="buy"><b>${wins}</b></span></span>
+      <span>Losses: <span class="sell"><b>${losses}</b></span></span>
+      <span>Win Rate: <b>${winRate}%</b></span>
+      <span>Total P&L: <span class="${totalPnl >= 0 ? 'buy' : 'sell'}"><b>₹${totalPnl.toFixed(2)}</b></span></span>
+    `;
 
-      // Signal rows
-      signals.forEach(s => {
-        const pnlClass = s.pnl === null   ? ""
-                       : s.pnl >= 0       ? "buy" : "sell";
-        const result   = s.profitable === 1 ? "✅ WIN"
-                       : s.profitable === 0 ? "❌ LOSS" : "⏳ Open";
-        const sigClass = s.signal === "BUY" ? "buy" : "sell";
-        const mlClass  = s.predicted === "ACCEPT" ? "accept" : "avoid";
-        const conf     = s.confidence !== null
-                       ? (s.confidence * 100).toFixed(0) + "%" : "—";
-
-        tbody.innerHTML += `<tr>
-          <td>${s.timestamp}</td>
-          <td><b>${s.symbol}</b></td>
-          <td class="${sigClass}">${s.signal}</td>
-          <td>${s.entry_ltp}</td>
-          <td>${s.exit_ltp ?? "—"}</td>
-          <td class="${pnlClass}">${s.pnl !== null ? s.pnl.toFixed(2) : "—"}</td>
-          <td>${result}</td>
-          <td class="${mlClass}">${s.predicted ?? "—"}</td>
-          <td>${conf}</td>
-        </tr>`;
-      });
-
-    } catch(e) {
-      console.error("Signal fetch error:", e);
+    // ── Sound on new signal ───────────────────────────────────
+    if (signals.length > lastSigCount && lastSigCount > 0) {
+      const newest = signals[0];
+      playAlert(newest.signal, newest.market || "NSE");
     }
-  }
+    lastSigCount = signals.length;
 
-  setInterval(loadSignals, 5000);
-  loadSignals();
+    // ── Rescreen status ───────────────────────────────────────
+    document.getElementById("rescreen-status").textContent =
+      `Last refreshed: ${new Date().toLocaleTimeString()} | Next rescreen: ~30 min`;
+
+    // ── Signal rows ───────────────────────────────────────────
+    const filtered = activeTab === "ALL"
+                   ? signals
+                   : signals.filter(s => s.market === activeTab);
+
+    const tbody = document.getElementById("signal-tbody");
+    if (!filtered.length) {
+      tbody.innerHTML = `<tr><td colspan="10" class="empty">No signals yet</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(s => {
+      const pnlClass = s.pnl === null ? "" : s.pnl >= 0 ? "buy" : "sell";
+      const result   = s.profitable === 1 ? "✅ WIN"
+                     : s.profitable === 0 ? "❌ LOSS" : "⏳ Open";
+      const sigClass = s.signal === "BUY" ? "buy" : "sell";
+      const mlClass  = s.predicted === "ACCEPT" ? "accept" : "avoid";
+      const conf     = s.confidence !== null
+                     ? (s.confidence * 100).toFixed(0) + "%" : "—";
+      return `<tr>
+        <td>${s.timestamp}</td>
+        <td>${badge(s.market || "NSE")}</td>
+        <td><b>${s.symbol}</b></td>
+        <td class="${sigClass}">${s.signal}</td>
+        <td>${s.entry_ltp ?? "—"}</td>
+        <td>${s.exit_ltp ?? "—"}</td>
+        <td class="${pnlClass}">${s.pnl !== null ? s.pnl.toFixed(2) : "—"}</td>
+        <td>${result}</td>
+        <td class="${mlClass}">${s.predicted ?? "—"}</td>
+        <td>${conf}</td>
+      </tr>`;
+    }).join("");
+
+  } catch(e) {
+    console.error("Signal fetch error:", e);
+  }
+}
+
+setInterval(loadSignals, 5000);
+loadSignals();
 </script>
 </body>
 </html>
