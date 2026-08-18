@@ -50,6 +50,7 @@ def run_flask():
 _clients = set()
 
 async def ws_handler(websocket):
+    global _clients
     _clients.add(websocket)
     try:
         await websocket.wait_closed()
@@ -57,6 +58,7 @@ async def ws_handler(websocket):
         _clients.discard(websocket)
 
 async def broadcast_loop():
+    global _clients
     while True:
         await asyncio.sleep(2)
         if not _clients or _engine is None:
