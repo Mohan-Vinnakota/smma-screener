@@ -54,6 +54,15 @@
 <body>
   <h1>SMMA Screener — Live</h1>
   <div class="status" id="status">Connecting...</div>
+  <div class="status" id="rescreen-status"></div>
+
+  <!-- Sound toggle -->
+  <div style="margin-bottom:12px;">
+    <label style="color:#718096; cursor:pointer;">
+      <input type="checkbox" id="sound-toggle" checked style="margin-right:6px;">
+      🔔 Sound alerts
+    </label>
+  </div>
 
   <!-- Live Screener Table -->
   <table>
@@ -106,6 +115,25 @@
   </table>
 
 <script>
+  // ── Sound alert ───────────────────────────────────────────
+  let lastSignalCount = 0;
+
+  function playAlert(type) {
+    if (!document.getElementById("sound-toggle").checked) return;
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    // BUY = higher pitch, SELL = lower pitch
+    osc.frequency.value = type === "BUY" ? 880 : 440;
+    osc.type = "sine";
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.6);
+  }
+
   // ── WebSocket for live screener ────────────────────────────
   const ws = new WebSocket("ws://127.0.0.1:8765");
 
@@ -179,6 +207,20 @@
         Total P&L: <span class="${totalPnl >= 0 ? 'buy' : 'sell'}">
         <b>₹${totalPnl.toFixed(2)}</b></span>
       `;
+
+      // Sound alert on new signal
+      if (signals.length > lastSignalCount && lastSignalCount > 0) {
+        const newest = signals[0];
+        playAlert(newest.signal);
+      }
+      lastSignalCount = signals.length;
+
+      // Update rescreen status
+      const rescreenEl = document.getElementById("rescreen-status");
+      if (rescreenEl) {
+        const now = new Date();
+        rescreenEl.innerHTML = `Last refreshed: ${now.toLocaleTimeString()} | Next rescreen: ~30 min`;
+      }
 
       // Signal rows
       signals.forEach(s => {

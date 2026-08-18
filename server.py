@@ -31,11 +31,6 @@ def api_rows():
 def api_signals():
     return jsonify(get_all_signals())
 
-def api_rows():
-    if _engine is None:
-        return jsonify([])
-    return jsonify(_engine.get_rows())
-
 # ── Flask thread ──────────────────────────────────────────────
 def run_flask():
     logger.info(f"Dashboard → http://{HTTP_HOST}:{HTTP_PORT}")

@@ -292,11 +292,27 @@ class Engine:
             })
         return rows
 
+    def rescreen_loop(self):
+        """Re-screen every 30 minutes and update WebSocket subscription."""
+        while True:
+            time.sleep(30 * 60)
+            logger.info("Re-screening stocks (30-min cycle)...")
+            try:
+                new_tokens = self.screen()
+                if new_tokens:
+                    self._ws_tokens = new_tokens
+                    logger.info(f"Re-screen complete — {len(new_tokens)} stocks active")
+                else:
+                    logger.warning("Re-screen returned 0 stocks — keeping existing list")
+            except Exception as e:
+                logger.error(f"Re-screen error: {e}")
+
     def run(self):
         if not self.login():
             return
         tokens = self.screen()
         if tokens:
+            threading.Thread(target=self.rescreen_loop, daemon=True).start()
             self.start_websocket(tokens)
         else:
             print("No stocks passed filter — try during market hours")
