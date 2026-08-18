@@ -22,8 +22,12 @@ def index():
     return send_from_directory("dashboard", "index.html")
 
 @app.route("/api/rows")
-@app.route("/api/signals")
+def api_rows():
+    if _engine is None:
+        return jsonify([])
+    return jsonify(_engine.get_rows())
 
+@app.route("/api/signals")
 def api_signals():
     return jsonify(get_all_signals())
 

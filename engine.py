@@ -15,7 +15,7 @@ from config import (
     LTP_MIN, LTP_MAX, MIN_BID_QTY, MIN_ASK_QTY,
     TICK_STORE_MINUTES, NSE_SYMBOL_FILE, WS_RECONNECT_DELAY
 )
-
+from telegram_alert import send_alert, format_signal_alert
 # ── Config ────────────────────────────────────────────────────
 with open("credentials.json") as f:
     creds = json.load(f)
@@ -106,6 +106,11 @@ class SymbolState:
         self.open_trade    = record
 
         logger.info(f"🚨 SIGNAL {self.symbol}: {signal} @ ₹{ltp} | {self.ml_verdict} ({conf:.0%})")
+        try:
+            msg = format_signal_alert(self.symbol, signal, ltp, self.ml_verdict, self.ml_confidence)
+            send_alert(msg)
+        except Exception as e:
+            logger.error(f"Telegram alert failed: {e}")
 
         save_signal(
             symbol=self.symbol,

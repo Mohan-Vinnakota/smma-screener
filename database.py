@@ -72,19 +72,6 @@ def save_signal(symbol, signal, entry_ltp, exit_ltp=None,
 def update_signal_exit(symbol, signal, exit_ltp, pnl, profitable):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE signals
-        SET exit_ltp = ?, pnl = ?, profitable = ?
-        WHERE symbol = ? AND signal = ?
-        AND exit_ltp IS NULL
-        ORDER BY id DESC
-        LIMIT 1
-    """, (exit_ltp, pnl, profitable, symbol, signal))
-    conn.commit()
-    conn.close()
-def update_signal_exit(symbol, signal, exit_ltp, pnl, profitable):
-    conn = get_connection()
-    cursor = conn.cursor()
 
     # First find the latest open signal id
     cursor.execute("""
