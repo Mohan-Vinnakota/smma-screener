@@ -9,4 +9,5 @@ smartapi-python
 pyotp
 logzero
 websocket-client
+tzdata
 pyinstaller

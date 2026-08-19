@@ -79,6 +79,7 @@
     .badge-cds { background: #1a2d00; color: #a3e635; }
     .badge-fno { background: #2d0038; color: #e879f9; }
     .badge-crypto { background: #002d1a; color: #34d399; }
+    .badge-us { background: #1a0038; color: #818cf8; }
 
     /* ── P&L summary bar ─────────────────────────────────── */
     .pnl-bar {
@@ -161,6 +162,7 @@
     <div class="tab"        data-tab="CDS"  onclick="switchTab('CDS')">NSE Currency</div>
     <div class="tab"        data-tab="FNO"  onclick="switchTab('FNO')">NSE F&amp;O</div>
     <div class="tab"        data-tab="CRYPTO"  onclick="switchTab('CRYPTO')">Crypto</div>
+    <div class="tab"        data-tab="US"  onclick="switchTab('US')">US Markets</div>
   </div>
 
   <!-- P&L Summary -->
@@ -173,10 +175,10 @@
         <tr>
           <th>Mkt</th>
           <th>Symbol</th>
-          <th>LTP ₹</th>
-          <th>Bid ₹</th>
+          <th>LTP</th>
+          <th>Bid</th>
           <th>Bid Qty</th>
-          <th>Ask ₹</th>
+          <th>Ask</th>
           <th>Ask Qty</th>
           <th>SMMA(20)</th>
           <th>SMMA(120)</th>
@@ -205,9 +207,9 @@
           <th>Mkt</th>
           <th>Symbol</th>
           <th>Signal</th>
-          <th>Entry ₹</th>
-          <th>Exit ₹</th>
-          <th>P&L ₹</th>
+          <th>Entry</th>
+          <th>Exit</th>
+          <th>P&L</th>
           <th>Result</th>
           <th>ML</th>
           <th>Conf</th>
@@ -243,8 +245,17 @@ function badge(market) {
             : market === "CDS" ? "badge-cds"
             : market === "FNO" ? "badge-fno"
             : market === "CRYPTO" ? "badge-crypto"
+            : market === "US" ? "badge-us"
             : "badge-nse";
   return `<span class="badge ${cls}">${market}</span>`;
+}
+
+// ── Currency symbol per market ──────────────────────────────────
+// CRYPTO and US Equities are dollar-priced; NSE/MCX/CDS/FNO are
+// rupee-priced. Kept separate from badge() since it drives ₹/$
+// prefixes on every price cell, not just the market label.
+function currency(market) {
+  return (market === "CRYPTO" || market === "US") ? "$" : "₹";
 }
 
 // ── Sound alert ───────────────────────────────────────────────
@@ -267,6 +278,8 @@ function playAlert(type, market) {
     osc.frequency.value = type === "BUY" ? 990  : 500;
   } else if (market === "CRYPTO") {
     osc.frequency.value = type === "BUY" ? 1500 : 260;
+  } else if (market === "US") {
+    osc.frequency.value = type === "BUY" ? 1200 : 380;
   } else {
     osc.frequency.value = type === "BUY" ? 880  : 440;
   }
@@ -290,13 +303,14 @@ function renderLive() {
                    : r.signal === "SELL" ? "sell" : "dim";
     const mlClass  = r.ml_verdict === "ACCEPT" ? "accept"
                    : r.ml_verdict === "AVOID"  ? "avoid" : "dim";
+    const cur = currency(r.market);
     return `<tr>
       <td>${badge(r.market)}</td>
       <td><b>${r.symbol}</b></td>
-      <td>${r.ltp ?? "—"}</td>
-      <td>${r.bid_price ?? "—"}</td>
+      <td>${r.ltp != null ? cur + r.ltp : "—"}</td>
+      <td>${r.bid_price != null ? cur + r.bid_price : "—"}</td>
       <td>${(r.bid_qty ?? 0).toLocaleString()}</td>
-      <td>${r.ask_price ?? "—"}</td>
+      <td>${r.ask_price != null ? cur + r.ask_price : "—"}</td>
       <td>${(r.ask_qty ?? 0).toLocaleString()}</td>
       <td>${r.smma_fast ?? "—"}</td>
       <td>${r.smma_slow ?? "—"}</td>
@@ -331,8 +345,9 @@ ws.onmessage = (event) => {
   const cdsCount = allRows.filter(r => r.market === "CDS").length;
   const fnoCount = allRows.filter(r => r.market === "FNO").length;
   const cryptoCount = allRows.filter(r => r.market === "CRYPTO").length;
+  const usCount = allRows.filter(r => r.market === "US").length;
   document.getElementById("counts").textContent =
-    `NSE: ${nseCount}  |  MCX: ${mcxCount}  |  CDS: ${cdsCount}  |  FNO: ${fnoCount}  |  CRYPTO: ${cryptoCount}`;
+    `NSE: ${nseCount}  |  MCX: ${mcxCount}  |  CDS: ${cdsCount}  |  FNO: ${fnoCount}  |  CRYPTO: ${cryptoCount}  |  US: ${usCount}`;
 
   renderLive();
 };
@@ -355,15 +370,23 @@ async function loadSignals() {
     const wins     = closed.filter(s => s.profitable === 1).length;
     const losses   = closed.filter(s => s.profitable === 0).length;
     const open     = signals.filter(s => s.pnl === null).length;
-    const totalPnl = closed.reduce((sum, s) => sum + s.pnl, 0);
     const winRate  = closed.length > 0
                    ? ((wins / closed.length) * 100).toFixed(1) : "0.0";
+
+    // P&L is currency-native per market — CRYPTO/US trade in dollars,
+    // NSE/MCX/CDS/FNO in rupees — so summed separately rather than
+    // added together into one meaningless mixed-currency total.
+    const closedInr  = closed.filter(s => currency(s.market) === "₹");
+    const closedUsd  = closed.filter(s => currency(s.market) === "$");
+    const totalPnlInr = closedInr.reduce((sum, s) => sum + s.pnl, 0);
+    const totalPnlUsd = closedUsd.reduce((sum, s) => sum + s.pnl, 0);
 
     const nseTotal = signals.filter(s => s.market === "NSE").length;
     const mcxTotal = signals.filter(s => s.market === "MCX").length;
     const cdsTotal = signals.filter(s => s.market === "CDS").length;
     const fnoTotal = signals.filter(s => s.market === "FNO").length;
     const cryptoTotal = signals.filter(s => s.market === "CRYPTO").length;
+    const usTotal = signals.filter(s => s.market === "US").length;
 
     document.getElementById("pnl-summary").innerHTML = `
       <span>Signals: <b>${signals.length}</b></span>
@@ -372,12 +395,14 @@ async function loadSignals() {
       <span>CDS: <b>${cdsTotal}</b></span>
       <span>FNO: <b>${fnoTotal}</b></span>
       <span>CRYPTO: <b>${cryptoTotal}</b></span>
+      <span>US: <b>${usTotal}</b></span>
       <span>Closed: <b>${closed.length}</b></span>
       <span>Open: <b>${open}</b></span>
       <span>Wins: <span class="buy"><b>${wins}</b></span></span>
       <span>Losses: <span class="sell"><b>${losses}</b></span></span>
       <span>Win Rate: <b>${winRate}%</b></span>
-      <span>Total P&L: <span class="${totalPnl >= 0 ? 'buy' : 'sell'}"><b>₹${totalPnl.toFixed(2)}</b></span></span>
+      <span>P&L (₹): <span class="${totalPnlInr >= 0 ? 'buy' : 'sell'}"><b>₹${totalPnlInr.toFixed(2)}</b></span></span>
+      <span>P&L ($): <span class="${totalPnlUsd >= 0 ? 'buy' : 'sell'}"><b>$${totalPnlUsd.toFixed(2)}</b></span></span>
     `;
 
     // ── Sound on new signal ───────────────────────────────────
@@ -410,14 +435,15 @@ async function loadSignals() {
       const mlClass  = s.predicted === "ACCEPT" ? "accept" : "avoid";
       const conf     = s.confidence !== null
                      ? (s.confidence * 100).toFixed(0) + "%" : "—";
+      const cur      = currency(s.market || "NSE");
       return `<tr>
         <td>${s.timestamp}</td>
         <td>${badge(s.market || "NSE")}</td>
         <td><b>${s.symbol}</b></td>
         <td class="${sigClass}">${s.signal}</td>
-        <td>${s.entry_ltp ?? "—"}</td>
-        <td>${s.exit_ltp ?? "—"}</td>
-        <td class="${pnlClass}">${s.pnl !== null ? s.pnl.toFixed(2) : "—"}</td>
+        <td>${s.entry_ltp != null ? cur + s.entry_ltp : "—"}</td>
+        <td>${s.exit_ltp != null ? cur + s.exit_ltp : "—"}</td>
+        <td class="${pnlClass}">${s.pnl !== null ? cur + s.pnl.toFixed(2) : "—"}</td>
         <td>${result}</td>
         <td class="${mlClass}">${s.predicted ?? "—"}</td>
         <td>${conf}</td>

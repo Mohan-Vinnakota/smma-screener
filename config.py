@@ -68,6 +68,27 @@ CRYPTO_SYMBOLS = [
 BINANCE_REST_BASE = "https://api.binance.com"
 BINANCE_WS_BASE    = "wss://stream.binance.com:9443"
 
+# ── US Markets (Alpaca) Screening ───────────────────────────────
+US_LTP_MIN     = 0
+US_LTP_MAX     = 999_999
+US_MIN_QTY     = 0   # optional volume filter, 0 = no filter for now
+
+# US stocks to track (must match Alpaca's exact ticker, e.g. "AAPL")
+US_SYMBOLS = [
+    "AAPL",
+    "MSFT",
+    "GOOGL",
+    "AMZN",
+    "TSLA",
+    "NVDA",
+    "META",
+]
+
+ALPACA_DATA_WS_BASE = "wss://stream.data.alpaca.markets/v2"
+ALPACA_DATA_FEED    = "iex"   # "iex" = free real-time feed; "sip" needs a paid subscription
+ALPACA_TRADING_BASE = "https://api.alpaca.markets"
+ALPACA_ASSETS_URL   = f"{ALPACA_TRADING_BASE}/v2/assets"
+
 # ── SMMA Periods ──────────────────────────────────────────────
 SMMA_FAST   = 20
 SMMA_SLOW   = 120
@@ -93,6 +114,7 @@ MCX_SYMBOL_FILE     = "mcx_symbols.csv"
 CDS_SYMBOL_FILE     = "cds_symbols.csv"
 FNO_SYMBOL_FILE     = "fno_symbols.csv"
 CRYPTO_SYMBOL_FILE  = "crypto_symbols.csv"
+US_SYMBOL_FILE      = "us_symbols.csv"
 DB_PATH             = "smma_screener.db"
 LOG_FOLDER          = "logs"
 
@@ -112,3 +134,12 @@ CDS_OPEN_H,  CDS_OPEN_M  = 9,  0
 CDS_CLOSE_H, CDS_CLOSE_M = 17, 0
 FNO_OPEN_H,  FNO_OPEN_M  = 9,  15
 FNO_CLOSE_H, FNO_CLOSE_M = 15, 30
+
+# US Equities (Alpaca): 09:30 – 16:00 US/Eastern.
+# Unlike the IST markets above, this can't be a fixed IST hour pair —
+# the ET→IST offset itself shifts by an hour twice a year with US DST
+# (India doesn't observe DST). market_us.py computes this with
+# zoneinfo("America/New_York") directly instead of a fixed-offset
+# lookup, so it stays correct year-round.
+US_OPEN_H,  US_OPEN_M  = 9,  30
+US_CLOSE_H, US_CLOSE_M = 16, 0

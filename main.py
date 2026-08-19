@@ -17,13 +17,14 @@ init_db()
 
 # ─────────────────────────────────────────────────────────────
 if SIMULATE:
-    logger.info("=== SIMULATION MODE (NSE + MCX + CDS + FNO + CRYPTO) ===")
+    logger.info("=== SIMULATION MODE (NSE + MCX + CDS + FNO + CRYPTO + US) ===")
 
     from market_nse_equity import SymbolState
     from market_mcx import MCXSymbolState
     from market_nse_currency import CDSSymbolState
     from market_nse_fno import FNOSymbolState
     from market_crypto import CryptoSymbolState
+    from market_us import USSymbolState
     from ml_model import MLModel
     from config import ML_MIN_SAMPLES
 
@@ -66,6 +67,7 @@ if SIMULATE:
             self.cds_symbols    = {}
             self.fno_symbols    = {}
             self.crypto_symbols = {}
+            self.us_symbols     = {}
 
         def get_rows(self):
             rows = []
@@ -74,6 +76,7 @@ if SIMULATE:
             rows += _rows_for(self.cds_symbols, "CDS", 4)
             rows += _rows_for(self.fno_symbols, "FNO", 2)
             rows += _rows_for(self.crypto_symbols, "CRYPTO", 2)
+            rows += _rows_for(self.us_symbols, "US", 2)
             return rows
 
         def get_rows_by_market(self, market):
@@ -138,6 +141,19 @@ if SIMULATE:
     for sym, price in crypto_demo:
         engine.crypto_symbols[sym] = CryptoSymbolState(sym, sym, shared_ml)
 
+    # ── US demo stocks ─────────────────────────────────────────
+    us_demo = [
+        ("AAPL",   225.0),
+        ("MSFT",   420.0),
+        ("GOOGL",  175.0),
+        ("AMZN",   185.0),
+        ("TSLA",   250.0),
+        ("NVDA",   130.0),
+        ("META",   560.0),
+    ]
+    for sym, price in us_demo:
+        engine.us_symbols[sym] = USSymbolState(sym, sym, shared_ml)
+
     # ── Price simulator ───────────────────────────────────────
     class StockSim:
         def __init__(self, price, vol_scale=1.0):
@@ -160,6 +176,7 @@ if SIMULATE:
     cds_sims = {sym: StockSim(p, 0.3)   for sym, p in cds_demo}  # currency pairs move slower
     fno_sims = {sym: StockSim(p, 1.2)   for sym, p in fno_demo}  # index futures moderately volatile
     crypto_sims = {sym: StockSim(p, 2.0) for sym, p in crypto_demo}  # crypto: most volatile of all
+    us_sims = {sym: StockSim(p, 1.0)     for sym, p in us_demo}      # US equities: baseline volatility
 
     def simulate():
         while True:
@@ -217,13 +234,24 @@ if SIMULATE:
                 ask_qty   = round(random.uniform(0.1, 5.0), 3)
                 state.on_tick(price, ltq, bid_price, bid_qty, ask_price, ask_qty)
 
+            # US ticks (regular US equity volatility, tight spread)
+            for sym, state in engine.us_symbols.items():
+                price     = us_sims[sym].next_price()
+                ltq       = random.randint(1, 500)
+                spread    = price * 0.0004
+                bid_price = round(price - spread, 2)
+                ask_price = round(price + spread, 2)
+                bid_qty   = random.randint(100, 5000)
+                ask_qty   = random.randint(100, 5000)
+                state.on_tick(price, ltq, bid_price, bid_qty, ask_price, ask_qty)
+
             time.sleep(0.5)
 
     threading.Thread(target=simulate, daemon=True).start()
     logger.info(
         f"Simulating {len(nse_demo)} NSE stocks + {len(mcx_demo)} MCX commodities "
         f"+ {len(cds_demo)} currency pairs + {len(fno_demo)} index futures "
-        f"+ {len(crypto_demo)} crypto pairs"
+        f"+ {len(crypto_demo)} crypto pairs + {len(us_demo)} US stocks"
     )
 
 # ─────────────────────────────────────────────────────────────
