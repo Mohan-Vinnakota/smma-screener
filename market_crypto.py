@@ -113,18 +113,21 @@ class CryptoSymbolState:
 
         pred, conf, reason = self.ml.predict(record)
         record.predicted   = pred
-        record.confidence  = round(float(conf), 2)
+        record.confidence  = round(float(conf), 2) if conf is not None else None
         record.reason      = reason
 
         self.signal        = signal
-        self.ml_verdict    = "ACCEPT" if pred else "AVOID"
-        self.ml_confidence = round(float(conf), 2)
+        # pred is None until the model has enough closed trades to be
+        # trusted (see MLModel.is_trusted) — don't show a fake ACCEPT/AVOID.
+        self.ml_verdict    = "Learning" if pred is None else ("ACCEPT" if pred else "AVOID")
+        self.ml_confidence = round(float(conf), 2) if conf is not None else None
         self.ml_reason     = reason
         self.open_trade    = record
+        conf_str            = f"{conf:.0%}" if conf is not None else "n/a"
 
         logger.info(
             f"🪙 CRYPTO SIGNAL {self.symbol}: {signal} @ ${ltp:,.2f} "
-            f"| {self.ml_verdict} ({conf:.0%})"
+            f"| {self.ml_verdict} ({conf_str})"
         )
 
         try:
@@ -142,7 +145,7 @@ class CryptoSymbolState:
             entry_ltp=ltp,
             market=MARKET,
             predicted=self.ml_verdict,
-            confidence=round(float(conf), 2),
+            confidence=round(float(conf), 2) if conf is not None else None,
             reason=reason,
             features=record.get_features().tolist()
         )

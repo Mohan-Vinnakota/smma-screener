@@ -1,7 +1,7 @@
 import numpy as np
 import pickle
 import os
-from config import ML_MIN_SAMPLES, ML_CONFIDENCE_THRESHOLD
+from config import ML_MIN_SAMPLES, ML_CONFIDENCE_THRESHOLD, ML_TRUST_SAMPLES
 from logger import logger
 
 try:
@@ -34,7 +34,16 @@ class CrossoverRecord:
         # Features
         self.smma_gap  = (smma_fast - smma_slow) / smma_slow if smma_slow else 0
         self.ltq_ratio = avg_ltq_2m / avg_ltq_5m if avg_ltq_5m else 1.0
-        self.etq_5m    = etq_5m
+        # etq_5m used to be stored as the RAW 5-minute traded-quantity sum.
+        # That's fine within one market, but this model is shared across
+        # NSE equity (lakhs of shares), MCX/CDS (lot-based volumes), crypto
+        # (fractional BTC-style quantities) and US stocks — so the same
+        # raw number means wildly different things depending on market,
+        # and a single split point learned by the tree can't generalize
+        # across them. Normalizing by avg_ltq_5m turns it into "how many
+        # average-trade-sizes worth of volume traded in the last 5 min" —
+        # a unitless, market-comparable number.
+        self.etq_5m    = etq_5m / avg_ltq_5m if avg_ltq_5m else 0.0
         self.etq_ratio = etq_5m / etq_20m * 4 if etq_20m else 1.0
         self.spread    = (ask_price - bid_price) / entry_ltp if entry_ltp else 0
         self.signal_num = 1 if signal == "BUY" else 0
@@ -63,14 +72,30 @@ class CrossoverRecord:
 
 class MLModel:
     def __init__(self, model_path="ml_model.pkl", min_samples=ML_MIN_SAMPLES,
-                 confidence_threshold=ML_CONFIDENCE_THRESHOLD):
-        self.model_path  = model_path
-        self.min_samples = min_samples
-        self.threshold   = confidence_threshold
+                 confidence_threshold=ML_CONFIDENCE_THRESHOLD,
+                 trust_samples=ML_TRUST_SAMPLES):
+        self.model_path    = model_path
+        self.min_samples   = min_samples     # when XGBoost starts training
+        self.trust_samples = trust_samples   # when verdicts are shown to the user
+        self.threshold      = confidence_threshold
         self.model       = None
         self.X           = []   # feature rows
         self.y           = []   # labels (1=profit, 0=loss)
         self._load()
+
+    @property
+    def sample_count(self):
+        return len(self.y)
+
+    @property
+    def is_trusted(self):
+        """Whether there's enough closed-trade history for a verdict to
+        mean anything. min_samples (default 50) is just when XGBoost has
+        enough rows to fit without erroring — it says nothing about
+        whether the fit generalizes. trust_samples (default 100) is a
+        separate, higher bar for actually showing ACCEPT/AVOID to the
+        user instead of a neutral "Learning" state."""
+        return self.sample_count >= self.trust_samples
 
     def _load(self):
         if os.path.exists(self.model_path) and XGB_AVAILABLE:
@@ -138,7 +163,15 @@ class MLModel:
         return {name: round(float(val), 4) for name, val in pairs}
 
     def predict(self, record):
-        """Returns (prediction, confidence, reason)."""
+        """Returns (prediction, confidence, reason).
+        prediction/confidence are None — not a fake guess — until
+        is_trusted is True. A rule-based or freshly-trained XGBoost
+        score on a handful of samples is not a real signal; showing
+        ACCEPT/AVOID from it just teaches the user to trust noise."""
+        if not self.is_trusted:
+            reason = f"Learning ({self.sample_count}/{self.trust_samples} closed trades)"
+            return None, None, reason
+
         if self.model and XGB_AVAILABLE:
             feat = record.get_features().reshape(1, -1)
             prob = self.model.predict_proba(feat)[0][1]

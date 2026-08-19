@@ -106,6 +106,13 @@ ML_FEATURE_LONG     = 5    # minutes for long LTQ avg
 # historical outcomes and prints a recommended value to put here.
 ML_CONFIDENCE_THRESHOLD = 0.5
 
+# Below this many closed trades (across ALL markets combined), predict()
+# returns None/"Learning" instead of a fake ACCEPT/AVOID. ML_MIN_SAMPLES
+# above is only when XGBoost is numerically able to fit — this is the
+# separate, higher bar for actually trusting what it says. Raise this
+# further once you've seen how noisy the 100-sample verdicts still are.
+ML_TRUST_SAMPLES = 100
+
 # Fraction of each market's closed signals (chronological, most
 # recent last) held out as a test set in ml_backtest.py. Never
 # trained on — used only to measure real accuracy/precision/recall.

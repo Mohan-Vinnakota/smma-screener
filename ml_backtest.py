@@ -21,6 +21,7 @@ Usage:
     python ml_backtest.py                  # all markets combined
     python ml_backtest.py --market NSE     # one market only
     python ml_backtest.py --no-retrain     # report only, don't touch ml_model.pkl
+    python ml_backtest.py --data-report    # just show closed-trade counts vs. trust threshold, no ML needed
 
 Needs enough closed signals with a persisted feature vector to make a
 train/test split meaningful — with fewer than ~30 you'll just get a
@@ -35,7 +36,7 @@ import numpy as np
 
 from database import get_closed_signals_with_features, init_db
 from ml_model import FEATURE_NAMES
-from config import ML_BACKTEST_TEST_FRACTION, ML_CONFIDENCE_THRESHOLD
+from config import ML_BACKTEST_TEST_FRACTION, ML_CONFIDENCE_THRESHOLD, ML_TRUST_SAMPLES
 from logger import logger
 
 try:
@@ -126,6 +127,43 @@ def sweep_threshold(model, X_test, y_test):
     return best_thresh
 
 
+def data_report():
+    """Shows exactly how much closed-trade history exists per market and
+    how far each one is from ML_TRUST_SAMPLES — no training, no XGBoost/
+    sklearn required. Meant to be checked anytime without side effects."""
+    init_db()
+    rows = get_closed_signals_with_features()
+    total = len(rows)
+
+    print("=== ML Data Report ===")
+    print(f"Total closed signals with a usable feature vector: {total}")
+    print(f"Trust threshold (ML_TRUST_SAMPLES): {ML_TRUST_SAMPLES}  "
+          f"(below this, the dashboard shows 'Learning', not ACCEPT/AVOID)")
+    print(f"Backtest minimum (MIN_ROWS_FOR_BACKTEST): {MIN_ROWS_FOR_BACKTEST}  "
+          f"(below this, ml_backtest.py's report/sweep refuses to run)")
+
+    if total == 0:
+        print("\nNo closed signals yet — nothing to report per market.")
+        return
+
+    markets = sorted(set(r["market"] for r in rows))
+    print(f"\n{'Market':<10} {'Closed':<8} {'Wins':<6} {'Win%':<7} {'/Trust':<8} {'/Backtest':<10}")
+    for m in markets:
+        m_rows = [r for r in rows if r["market"] == m]
+        n = len(m_rows)
+        wins = sum(1 for r in m_rows if r["profitable"] == 1)
+        win_pct = f"{wins / n:.0%}" if n else "—"
+        trust_pct = f"{min(100, n / ML_TRUST_SAMPLES * 100):.0f}%"
+        bt_pct = f"{min(100, n / MIN_ROWS_FOR_BACKTEST * 100):.0f}%"
+        print(f"{m:<10} {n:<8} {wins:<6} {win_pct:<7} {trust_pct:<8} {bt_pct:<10}")
+
+    overall_trust_pct = min(100, total / ML_TRUST_SAMPLES * 100)
+    print(f"\nOverall: {total}/{ML_TRUST_SAMPLES} toward trusted verdicts ({overall_trust_pct:.0f}%)")
+    if total < MIN_ROWS_FOR_BACKTEST:
+        print(f"Not enough data yet for ml_backtest.py's report/sweep either "
+              f"(need {MIN_ROWS_FOR_BACKTEST}, have {total}).")
+
+
 def run(market=None, retrain=True):
     if not XGB_AVAILABLE:
         print("❌ XGBoost not installed — can't backtest. pip install xgboost")
@@ -207,6 +245,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Backtest, evaluate, and retrain the SMMA screener's ML model.")
     parser.add_argument("--market", default=None, help="Restrict to one market, e.g. NSE, MCX, CDS, FNO, CRYPTO, US")
     parser.add_argument("--no-retrain", action="store_true", help="Report only — don't overwrite ml_model.pkl")
+    parser.add_argument("--data-report", action="store_true",
+                         help="Just show closed-trade counts per market vs. the trust threshold, then exit")
     args = parser.parse_args()
+
+    if args.data_report:
+        data_report()
+        sys.exit(0)
 
     run(market=args.market, retrain=not args.no_retrain)
