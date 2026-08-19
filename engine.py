@@ -1,6 +1,7 @@
 """
 engine.py — Market Manager
-Coordinates all markets: NSE Equity + MCX Commodities + NSE Currency (CDS) + NSE F&O.
+Coordinates all markets: NSE Equity + MCX Commodities + NSE Currency (CDS)
++ NSE F&O + Crypto (Binance).
 Each market runs in its own thread.
 Shared ML model across all markets.
 get_rows() merges all markets for the dashboard.
@@ -16,6 +17,7 @@ from market_nse_equity import NSEEquityMarket
 from market_mcx import MCXMarket
 from market_nse_currency import CDSMarket
 from market_nse_fno import FNOMarket
+from market_crypto import CryptoMarket
 from database import init_db
 from logger import logger
 from config import ML_MIN_SAMPLES
@@ -59,7 +61,16 @@ class Engine:
 
     # ── Start all markets ─────────────────────────────────────
     def run(self):
+        # Crypto needs no Angel One login — public Binance data.
+        # Start it independently so a crypto-only run still works
+        # even if Angel One login fails.
+        crypto = CryptoMarket(self.ml)
+        self.markets["CRYPTO"] = crypto
+        threading.Thread(target=crypto.start, daemon=True, name="CRYPTO").start()
+        logger.info("Crypto (Binance) market started")
+
         if not self.login():
+            logger.warning("Angel One login failed — running CRYPTO only")
             return
 
         # NSE Equity (09:15 – 15:30)

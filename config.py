@@ -52,6 +52,22 @@ FNO_SYMBOLS = [
     "FINNIFTY",
 ]
 
+# ── Crypto (Binance) Screening ─────────────────────────────────
+CRYPTO_LTP_MIN     = 0
+CRYPTO_LTP_MAX     = 999_999_999
+CRYPTO_MIN_QTY_24H = 0   # optional 24h volume filter, 0 = no filter for now
+
+# Pairs to track (Binance symbol format, USDT-quoted)
+CRYPTO_SYMBOLS = [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "BNBUSDT",
+]
+
+BINANCE_REST_BASE = "https://api.binance.com"
+BINANCE_WS_BASE    = "wss://stream.binance.com:9443"
+
 # ── SMMA Periods ──────────────────────────────────────────────
 SMMA_FAST   = 20
 SMMA_SLOW   = 120
@@ -76,6 +92,7 @@ NSE_SYMBOL_FILE     = "nse_symbols.csv"
 MCX_SYMBOL_FILE     = "mcx_symbols.csv"
 CDS_SYMBOL_FILE     = "cds_symbols.csv"
 FNO_SYMBOL_FILE     = "fno_symbols.csv"
+CRYPTO_SYMBOL_FILE  = "crypto_symbols.csv"
 DB_PATH             = "smma_screener.db"
 LOG_FOLDER          = "logs"
 

@@ -78,6 +78,7 @@
     .badge-mcx { background: #2d1a00; color: #f6ad55; }
     .badge-cds { background: #1a2d00; color: #a3e635; }
     .badge-fno { background: #2d0038; color: #e879f9; }
+    .badge-crypto { background: #002d1a; color: #34d399; }
 
     /* ── P&L summary bar ─────────────────────────────────── */
     .pnl-bar {
@@ -159,6 +160,7 @@
     <div class="tab"        data-tab="MCX"  onclick="switchTab('MCX')">MCX Commodities</div>
     <div class="tab"        data-tab="CDS"  onclick="switchTab('CDS')">NSE Currency</div>
     <div class="tab"        data-tab="FNO"  onclick="switchTab('FNO')">NSE F&amp;O</div>
+    <div class="tab"        data-tab="CRYPTO"  onclick="switchTab('CRYPTO')">Crypto</div>
   </div>
 
   <!-- P&L Summary -->
@@ -240,6 +242,7 @@ function badge(market) {
   const cls = market === "MCX" ? "badge-mcx"
             : market === "CDS" ? "badge-cds"
             : market === "FNO" ? "badge-fno"
+            : market === "CRYPTO" ? "badge-crypto"
             : "badge-nse";
   return `<span class="badge ${cls}">${market}</span>`;
 }
@@ -262,6 +265,8 @@ function playAlert(type, market) {
     osc.frequency.value = type === "BUY" ? 1300 : 220;
   } else if (market === "FNO") {
     osc.frequency.value = type === "BUY" ? 990  : 500;
+  } else if (market === "CRYPTO") {
+    osc.frequency.value = type === "BUY" ? 1500 : 260;
   } else {
     osc.frequency.value = type === "BUY" ? 880  : 440;
   }
@@ -325,8 +330,9 @@ ws.onmessage = (event) => {
   const mcxCount = allRows.filter(r => r.market === "MCX").length;
   const cdsCount = allRows.filter(r => r.market === "CDS").length;
   const fnoCount = allRows.filter(r => r.market === "FNO").length;
+  const cryptoCount = allRows.filter(r => r.market === "CRYPTO").length;
   document.getElementById("counts").textContent =
-    `NSE: ${nseCount}  |  MCX: ${mcxCount}  |  CDS: ${cdsCount}  |  FNO: ${fnoCount}`;
+    `NSE: ${nseCount}  |  MCX: ${mcxCount}  |  CDS: ${cdsCount}  |  FNO: ${fnoCount}  |  CRYPTO: ${cryptoCount}`;
 
   renderLive();
 };
@@ -357,6 +363,7 @@ async function loadSignals() {
     const mcxTotal = signals.filter(s => s.market === "MCX").length;
     const cdsTotal = signals.filter(s => s.market === "CDS").length;
     const fnoTotal = signals.filter(s => s.market === "FNO").length;
+    const cryptoTotal = signals.filter(s => s.market === "CRYPTO").length;
 
     document.getElementById("pnl-summary").innerHTML = `
       <span>Signals: <b>${signals.length}</b></span>
@@ -364,6 +371,7 @@ async function loadSignals() {
       <span>MCX: <b>${mcxTotal}</b></span>
       <span>CDS: <b>${cdsTotal}</b></span>
       <span>FNO: <b>${fnoTotal}</b></span>
+      <span>CRYPTO: <b>${cryptoTotal}</b></span>
       <span>Closed: <b>${closed.length}</b></span>
       <span>Open: <b>${open}</b></span>
       <span>Wins: <span class="buy"><b>${wins}</b></span></span>
