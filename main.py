@@ -29,6 +29,7 @@ if SIMULATE:
     from config import ML_MIN_SAMPLES
 
     shared_ml = MLModel(min_samples=ML_MIN_SAMPLES)
+    shared_ml.bootstrap_from_history()
 
     def _rows_for(symbols_dict, market, decimals):
         rows = []

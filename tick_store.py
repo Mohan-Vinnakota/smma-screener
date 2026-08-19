@@ -1,35 +1,48 @@
 from collections import deque
 import time
+import threading
 from practice import Tick
 
 class TickStore:
+    """Thread-safe: add() runs on the market's own thread as ticks
+    arrive, while etq()/avg_ltq()/avg_ltp() get called concurrently
+    from the dashboard's WebSocket broadcast thread. Without the lock,
+    one thread mutating the deque while another iterates it throws
+    'RuntimeError: deque mutated during iteration'."""
+
     def __init__(self, max_minutes=120):
         self.max_seconds = max_minutes * 60
         self._ticks = deque()
+        self._lock = threading.Lock()
 
     def add(self, tick):
-        self._ticks.append(tick)
-        cutoff = time.time() - self.max_seconds
-        while self._ticks and self._ticks[0].timestamp < cutoff:
-            self._ticks.popleft()
+        with self._lock:
+            self._ticks.append(tick)
+            cutoff = time.time() - self.max_seconds
+            while self._ticks and self._ticks[0].timestamp < cutoff:
+                self._ticks.popleft()
 
     def etq(self, minutes):
         cutoff = time.time() - minutes * 60
-        return sum(t.ltq for t in self._ticks if t.timestamp >= cutoff)
+        with self._lock:
+            return sum(t.ltq for t in self._ticks if t.timestamp >= cutoff)
 
     def count(self):
-        return len(self._ticks)
+        with self._lock:
+            return len(self._ticks)
 
     def avg_ltq(self, minutes):
         cutoff = time.time() - minutes * 60
-        recent = [t.ltq for t in self._ticks if t.timestamp >= cutoff]
+        with self._lock:
+            recent = [t.ltq for t in self._ticks if t.timestamp >= cutoff]
         if not recent:
             return None
         return sum(recent) / len(recent)
 
     def avg_ltp(self, minutes):
         cutoff = time.time() - minutes * 60
-        recent = [t for t in self._ticks if t.timestamp >= cutoff]
+        with self._lock:
+            recent = [t for t in self._ticks if t.timestamp >= cutoff]
         if not recent:
             return None
         total_qty = sum(t.ltq for t in recent)

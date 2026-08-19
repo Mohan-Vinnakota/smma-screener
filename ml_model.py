@@ -1,7 +1,7 @@
 import numpy as np
 import pickle
 import os
-from config import ML_MIN_SAMPLES
+from config import ML_MIN_SAMPLES, ML_CONFIDENCE_THRESHOLD
 from logger import logger
 
 try:
@@ -10,6 +10,13 @@ try:
 except ImportError:
     XGB_AVAILABLE = False
     print("XGBoost not installed — using rule-based fallback")
+
+# Order must match CrossoverRecord.get_features() exactly — used by
+# ml_backtest.py to label feature-importance output.
+FEATURE_NAMES = [
+    "signal_num", "entry_ltp", "smma_gap",
+    "ltq_ratio", "etq_5m", "etq_ratio", "spread",
+]
 
 
 class CrossoverRecord:
@@ -27,6 +34,7 @@ class CrossoverRecord:
         # Features
         self.smma_gap  = (smma_fast - smma_slow) / smma_slow if smma_slow else 0
         self.ltq_ratio = avg_ltq_2m / avg_ltq_5m if avg_ltq_5m else 1.0
+        self.etq_5m    = etq_5m
         self.etq_ratio = etq_5m / etq_20m * 4 if etq_20m else 1.0
         self.spread    = (ask_price - bid_price) / entry_ltp if entry_ltp else 0
         self.signal_num = 1 if signal == "BUY" else 0
@@ -47,16 +55,18 @@ class CrossoverRecord:
             self.entry_ltp,
             self.smma_gap,
             self.ltq_ratio,
-            self.etq_5m if hasattr(self, 'etq_5m') else 0,
+            self.etq_5m,
             self.etq_ratio,
             self.spread,
         ])
 
 
 class MLModel:
-    def __init__(self, model_path="ml_model.pkl", min_samples=ML_MIN_SAMPLES):
+    def __init__(self, model_path="ml_model.pkl", min_samples=ML_MIN_SAMPLES,
+                 confidence_threshold=ML_CONFIDENCE_THRESHOLD):
         self.model_path  = model_path
         self.min_samples = min_samples
+        self.threshold   = confidence_threshold
         self.model       = None
         self.X           = []   # feature rows
         self.y           = []   # labels (1=profit, 0=loss)
@@ -71,6 +81,29 @@ class MLModel:
     def _save(self):
         with open(self.model_path, "wb") as f:
             pickle.dump(self.model, f)
+
+    def bootstrap_from_history(self):
+        """Load every closed signal with a persisted feature vector
+        from the database and seed self.X/self.y with it. Without
+        this, online learning only sees trades closed during the
+        *current* run — every restart threw away all prior training
+        signal even though it was sitting in the DB the whole time.
+        Call once at startup, before the app starts taking new ticks."""
+        from database import get_closed_signals_with_features
+        rows = get_closed_signals_with_features()
+        if not rows:
+            return
+        for r in rows:
+            feat = [
+                r["feat_signal_num"], r["entry_ltp"], r["feat_smma_gap"],
+                r["feat_ltq_ratio"], r["feat_etq_5m"], r["feat_etq_ratio"],
+                r["feat_spread"],
+            ]
+            self.X.append(np.array(feat, dtype=float))
+            self.y.append(r["profitable"])
+        logger.info(f"ML: bootstrapped {len(rows)} historical outcomes from DB")
+        if len(self.y) >= self.min_samples and XGB_AVAILABLE:
+            self._train()
 
     def record_outcome(self, record):
         """Call when trade closes — adds training sample."""
@@ -95,12 +128,21 @@ class MLModel:
         self._save()
         logger.info(f"Model trained on {len(y)} samples")
 
+    def feature_importance(self):
+        """Returns {feature_name: importance} sorted descending, or
+        None if no XGBoost model has been trained yet."""
+        if not self.model or not XGB_AVAILABLE:
+            return None
+        importances = self.model.feature_importances_
+        pairs = sorted(zip(FEATURE_NAMES, importances), key=lambda p: -p[1])
+        return {name: round(float(val), 4) for name, val in pairs}
+
     def predict(self, record):
         """Returns (prediction, confidence, reason)."""
         if self.model and XGB_AVAILABLE:
             feat = record.get_features().reshape(1, -1)
             prob = self.model.predict_proba(feat)[0][1]
-            pred = 1 if prob >= 0.5 else 0
+            pred = 1 if prob >= self.threshold else 0
             reason = f"XGBoost: {'ACCEPT' if pred else 'AVOID'} ({prob:.0%} confidence)"
             return pred, round(prob, 3), reason
         else:
@@ -129,7 +171,7 @@ class MLModel:
             score -= 0.05
 
         score = max(0.05, min(0.95, score))
-        pred  = 1 if score >= 0.5 else 0
+        pred  = 1 if score >= self.threshold else 0
         verdict = "ACCEPT" if pred else "AVOID"
         reason = f"Rule-based: {verdict} (score={score:.2f})"
         return pred, round(score, 3), reason

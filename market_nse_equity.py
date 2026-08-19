@@ -135,7 +135,8 @@ class SymbolState:
             market=MARKET,
             predicted=self.ml_verdict,
             confidence=round(float(conf), 2),
-            reason=reason
+            reason=reason,
+            features=record.get_features().tolist()
         )
 
     def _close_trade(self, exit_ltp):

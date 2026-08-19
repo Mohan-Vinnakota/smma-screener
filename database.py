@@ -30,7 +30,6 @@ def init_db():
             timestamp   TEXT
         )
     """)
-
     # screened_stocks table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS screened_stocks (
@@ -48,6 +47,16 @@ def init_db():
     _add_column_if_missing(cursor, "signals",          "market", "TEXT DEFAULT 'NSE'")
     _add_column_if_missing(cursor, "screened_stocks",  "market", "TEXT DEFAULT 'NSE'")
 
+    # Migrate existing DB — persist the ML feature vector alongside each
+    # signal so ml_backtest.py can retrain/evaluate against real history
+    # instead of only whatever's in memory for the current run.
+    _add_column_if_missing(cursor, "signals", "feat_signal_num", "REAL")
+    _add_column_if_missing(cursor, "signals", "feat_smma_gap",   "REAL")
+    _add_column_if_missing(cursor, "signals", "feat_ltq_ratio",  "REAL")
+    _add_column_if_missing(cursor, "signals", "feat_etq_5m",     "REAL")
+    _add_column_if_missing(cursor, "signals", "feat_etq_ratio",  "REAL")
+    _add_column_if_missing(cursor, "signals", "feat_spread",     "REAL")
+
     conn.commit()
     conn.close()
     logger.info("Database ready")
@@ -61,14 +70,22 @@ def _add_column_if_missing(cursor, table, column, col_def):
 
 def save_signal(symbol, signal, entry_ltp, market="NSE",
                 exit_ltp=None, pnl=None, profitable=None,
-                predicted=None, confidence=None, reason=None):
+                predicted=None, confidence=None, reason=None,
+                features=None):
+    """features, if given, is the 6-value list from
+    CrossoverRecord.get_features(): [signal_num, entry_ltp, smma_gap,
+    ltq_ratio, etq_5m, etq_ratio, spread]. entry_ltp is stored in its
+    own column already so only the other 5 are persisted here."""
     conn = get_connection()
     cursor = conn.cursor()
+    f = features if features is not None else [None] * 7
     cursor.execute("""
         INSERT INTO signals
         (market, symbol, signal, entry_ltp, exit_ltp, pnl,
-         profitable, predicted, confidence, reason, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         profitable, predicted, confidence, reason, timestamp,
+         feat_signal_num, feat_smma_gap, feat_ltq_ratio,
+         feat_etq_5m, feat_etq_ratio, feat_spread)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         market, symbol, signal,
         float(entry_ltp) if entry_ltp is not None else None,
@@ -78,7 +95,8 @@ def save_signal(symbol, signal, entry_ltp, market="NSE",
         predicted,
         float(confidence) if confidence is not None else None,
         reason,
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        f[0], f[2], f[3], f[4], f[5], f[6],
     ))
     conn.commit()
     conn.close()
@@ -133,6 +151,27 @@ def get_all_signals(market=None):
             ORDER BY id DESC
             LIMIT 200
         """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+def get_closed_signals_with_features(market=None):
+    """All closed (exit_ltp/profitable filled) signals that have a
+    persisted feature vector, oldest first. Used by ml_backtest.py —
+    no LIMIT 200 here since backtesting wants the full history."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    query = """
+        SELECT * FROM signals
+        WHERE profitable IS NOT NULL
+          AND feat_smma_gap IS NOT NULL
+    """
+    params = ()
+    if market:
+        query += " AND market = ?"
+        params = (market,)
+    query += " ORDER BY id ASC"
+    cursor.execute(query, params)
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]

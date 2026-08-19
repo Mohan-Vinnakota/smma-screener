@@ -101,6 +101,16 @@ ML_MIN_SAMPLES      = 50
 ML_FEATURE_SHORT    = 2    # minutes for short LTQ avg
 ML_FEATURE_LONG     = 5    # minutes for long LTQ avg
 
+# Decision threshold — predict_proba() >= this counts as ACCEPT.
+# 0.5 is the naive default; ml_backtest.py sweeps this against real
+# historical outcomes and prints a recommended value to put here.
+ML_CONFIDENCE_THRESHOLD = 0.5
+
+# Fraction of each market's closed signals (chronological, most
+# recent last) held out as a test set in ml_backtest.py. Never
+# trained on — used only to measure real accuracy/precision/recall.
+ML_BACKTEST_TEST_FRACTION = 0.2
+
 # ── Server ────────────────────────────────────────────────────
 HTTP_PORT   = 5000
 WS_PORT     = 8765

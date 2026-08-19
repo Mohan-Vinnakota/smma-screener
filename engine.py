@@ -46,6 +46,10 @@ class Engine:
         self.ml       = MLModel(min_samples=ML_MIN_SAMPLES)
         self.markets  = {}   # name → market instance
         init_db()
+        # Seed the model with every closed trade ever recorded, not
+        # just what happens to close during this run — see
+        # MLModel.bootstrap_from_history() for why this matters.
+        self.ml.bootstrap_from_history()
 
     # ── Login ─────────────────────────────────────────────────
     def login(self):
