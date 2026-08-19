@@ -76,6 +76,8 @@
     }
     .badge-nse { background: #002a40; color: #38bdf8; }
     .badge-mcx { background: #2d1a00; color: #f6ad55; }
+    .badge-cds { background: #1a2d00; color: #a3e635; }
+    .badge-fno { background: #2d0038; color: #e879f9; }
 
     /* ── P&L summary bar ─────────────────────────────────── */
     .pnl-bar {
@@ -155,6 +157,8 @@
     <div class="tab active" data-tab="ALL"  onclick="switchTab('ALL')">All Markets</div>
     <div class="tab"        data-tab="NSE"  onclick="switchTab('NSE')">NSE Equity</div>
     <div class="tab"        data-tab="MCX"  onclick="switchTab('MCX')">MCX Commodities</div>
+    <div class="tab"        data-tab="CDS"  onclick="switchTab('CDS')">NSE Currency</div>
+    <div class="tab"        data-tab="FNO"  onclick="switchTab('FNO')">NSE F&amp;O</div>
   </div>
 
   <!-- P&L Summary -->
@@ -233,7 +237,10 @@ function filterRows(rows) {
 
 // ── Market badge HTML ─────────────────────────────────────────
 function badge(market) {
-  const cls = market === "MCX" ? "badge-mcx" : "badge-nse";
+  const cls = market === "MCX" ? "badge-mcx"
+            : market === "CDS" ? "badge-cds"
+            : market === "FNO" ? "badge-fno"
+            : "badge-nse";
   return `<span class="badge ${cls}">${market}</span>`;
 }
 
@@ -246,9 +253,15 @@ function playAlert(type, market) {
   osc.connect(gain);
   gain.connect(ctx.destination);
 
-  // NSE: BUY=880Hz SELL=440Hz  |  MCX: BUY=1100Hz SELL=330Hz (different pitch to tell apart)
+  // Different pitch per market so you can tell them apart by ear:
+  // NSE: BUY=880Hz SELL=440Hz | MCX: BUY=1100Hz SELL=330Hz
+  // CDS: BUY=1300Hz SELL=220Hz | FNO: BUY=990Hz SELL=500Hz
   if (market === "MCX") {
     osc.frequency.value = type === "BUY" ? 1100 : 330;
+  } else if (market === "CDS") {
+    osc.frequency.value = type === "BUY" ? 1300 : 220;
+  } else if (market === "FNO") {
+    osc.frequency.value = type === "BUY" ? 990  : 500;
   } else {
     osc.frequency.value = type === "BUY" ? 880  : 440;
   }
@@ -310,8 +323,10 @@ ws.onmessage = (event) => {
   // Update tab count badges
   const nseCount = allRows.filter(r => r.market === "NSE").length;
   const mcxCount = allRows.filter(r => r.market === "MCX").length;
+  const cdsCount = allRows.filter(r => r.market === "CDS").length;
+  const fnoCount = allRows.filter(r => r.market === "FNO").length;
   document.getElementById("counts").textContent =
-    `NSE: ${nseCount}  |  MCX: ${mcxCount}`;
+    `NSE: ${nseCount}  |  MCX: ${mcxCount}  |  CDS: ${cdsCount}  |  FNO: ${fnoCount}`;
 
   renderLive();
 };
@@ -340,11 +355,15 @@ async function loadSignals() {
 
     const nseTotal = signals.filter(s => s.market === "NSE").length;
     const mcxTotal = signals.filter(s => s.market === "MCX").length;
+    const cdsTotal = signals.filter(s => s.market === "CDS").length;
+    const fnoTotal = signals.filter(s => s.market === "FNO").length;
 
     document.getElementById("pnl-summary").innerHTML = `
       <span>Signals: <b>${signals.length}</b></span>
       <span>NSE: <b>${nseTotal}</b></span>
       <span>MCX: <b>${mcxTotal}</b></span>
+      <span>CDS: <b>${cdsTotal}</b></span>
+      <span>FNO: <b>${fnoTotal}</b></span>
       <span>Closed: <b>${closed.length}</b></span>
       <span>Open: <b>${open}</b></span>
       <span>Wins: <span class="buy"><b>${wins}</b></span></span>

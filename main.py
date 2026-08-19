@@ -17,73 +17,60 @@ init_db()
 
 # ─────────────────────────────────────────────────────────────
 if SIMULATE:
-    logger.info("=== SIMULATION MODE (NSE + MCX) ===")
+    logger.info("=== SIMULATION MODE (NSE + MCX + CDS + FNO) ===")
 
     from market_nse_equity import SymbolState
     from market_mcx import MCXSymbolState
+    from market_nse_currency import CDSSymbolState
+    from market_nse_fno import FNOSymbolState
     from ml_model import MLModel
     from config import ML_MIN_SAMPLES
 
     shared_ml = MLModel(min_samples=ML_MIN_SAMPLES)
+
+    def _rows_for(symbols_dict, market, decimals):
+        rows = []
+        for state in symbols_dict.values():
+            if state.last_ltp is None:
+                continue
+            f = state.detector.fast.value
+            s = state.detector.slow.value
+            rows.append({
+                "market":      market,
+                "symbol":      state.symbol,
+                "ltp":         round(state.last_ltp, decimals),
+                "smma_fast":   round(f, decimals) if f else None,
+                "smma_slow":   round(s, decimals) if s else None,
+                "signal":      state.signal,
+                "ml_verdict":  state.ml_verdict,
+                "ml_conf":     f"{state.ml_confidence:.0%}" if state.ml_confidence else None,
+                "ml_reason":   state.ml_reason,
+                "bid_price":   round(state.last_bid_price, decimals),
+                "bid_qty":     state.last_bid_qty,
+                "ask_price":   round(state.last_ask_price, decimals),
+                "ask_qty":     state.last_ask_qty,
+                "etq_5m":      state.store.etq(5),
+                "etq_20m":     state.store.etq(20),
+                "etq_60m":     state.store.etq(60),
+                "avg_ltp_20m": round(state.store.avg_ltp(20) or 0, decimals),
+                "avg_ltp_60m": round(state.store.avg_ltp(60) or 0, decimals),
+            })
+        return rows
 
     # Build a fake engine that exposes get_rows()
     class SimEngine:
         def __init__(self):
             self.nse_symbols = {}
             self.mcx_symbols = {}
+            self.cds_symbols = {}
+            self.fno_symbols = {}
 
         def get_rows(self):
             rows = []
-            for state in self.nse_symbols.values():
-                if state.last_ltp is None:
-                    continue
-                f = state.detector.fast.value
-                s = state.detector.slow.value
-                rows.append({
-                    "market":      "NSE",
-                    "symbol":      state.symbol,
-                    "ltp":         round(state.last_ltp, 2),
-                    "smma_fast":   round(f, 2) if f else None,
-                    "smma_slow":   round(s, 2) if s else None,
-                    "signal":      state.signal,
-                    "ml_verdict":  state.ml_verdict,
-                    "ml_conf":     f"{state.ml_confidence:.0%}" if state.ml_confidence else None,
-                    "ml_reason":   state.ml_reason,
-                    "bid_price":   round(state.last_bid_price, 2),
-                    "bid_qty":     state.last_bid_qty,
-                    "ask_price":   round(state.last_ask_price, 2),
-                    "ask_qty":     state.last_ask_qty,
-                    "etq_5m":      state.store.etq(5),
-                    "etq_20m":     state.store.etq(20),
-                    "etq_60m":     state.store.etq(60),
-                    "avg_ltp_20m": round(state.store.avg_ltp(20) or 0, 2),
-                    "avg_ltp_60m": round(state.store.avg_ltp(60) or 0, 2),
-                })
-            for state in self.mcx_symbols.values():
-                if state.last_ltp is None:
-                    continue
-                f = state.detector.fast.value
-                s = state.detector.slow.value
-                rows.append({
-                    "market":      "MCX",
-                    "symbol":      state.symbol,
-                    "ltp":         round(state.last_ltp, 2),
-                    "smma_fast":   round(f, 2) if f else None,
-                    "smma_slow":   round(s, 2) if s else None,
-                    "signal":      state.signal,
-                    "ml_verdict":  state.ml_verdict,
-                    "ml_conf":     f"{state.ml_confidence:.0%}" if state.ml_confidence else None,
-                    "ml_reason":   state.ml_reason,
-                    "bid_price":   round(state.last_bid_price, 2),
-                    "bid_qty":     state.last_bid_qty,
-                    "ask_price":   round(state.last_ask_price, 2),
-                    "ask_qty":     state.last_ask_qty,
-                    "etq_5m":      state.store.etq(5),
-                    "etq_20m":     state.store.etq(20),
-                    "etq_60m":     state.store.etq(60),
-                    "avg_ltp_20m": round(state.store.avg_ltp(20) or 0, 2),
-                    "avg_ltp_60m": round(state.store.avg_ltp(60) or 0, 2),
-                })
+            rows += _rows_for(self.nse_symbols, "NSE", 2)
+            rows += _rows_for(self.mcx_symbols, "MCX", 2)
+            rows += _rows_for(self.cds_symbols, "CDS", 4)
+            rows += _rows_for(self.fno_symbols, "FNO", 2)
             return rows
 
         def get_rows_by_market(self, market):
@@ -119,6 +106,25 @@ if SIMULATE:
     for sym, price in mcx_demo:
         engine.mcx_symbols[sym] = MCXSymbolState(sym, f"mcx_{sym}", shared_ml)
 
+    # ── CDS demo currency pairs ────────────────────────────────
+    cds_demo = [
+        ("USDINR-I",  87.50),
+        ("EURINR-I",  94.80),
+        ("GBPINR-I", 110.20),
+        ("JPYINR-I",   0.57),
+    ]
+    for sym, price in cds_demo:
+        engine.cds_symbols[sym] = CDSSymbolState(sym, f"cds_{sym}", shared_ml)
+
+    # ── FNO demo index futures ─────────────────────────────────
+    fno_demo = [
+        ("NIFTY-I",     24800.0),
+        ("BANKNIFTY-I", 51200.0),
+        ("FINNIFTY-I",  23600.0),
+    ]
+    for sym, price in fno_demo:
+        engine.fno_symbols[sym] = FNOSymbolState(sym, f"fno_{sym}", shared_ml)
+
     # ── Price simulator ───────────────────────────────────────
     class StockSim:
         def __init__(self, price, vol_scale=1.0):
@@ -138,6 +144,8 @@ if SIMULATE:
 
     nse_sims = {sym: StockSim(p)         for sym, p in nse_demo}
     mcx_sims = {sym: StockSim(p, 1.5)   for sym, p in mcx_demo}  # commodities more volatile
+    cds_sims = {sym: StockSim(p, 0.3)   for sym, p in cds_demo}  # currency pairs move slower
+    fno_sims = {sym: StockSim(p, 1.2)   for sym, p in fno_demo}  # index futures moderately volatile
 
     def simulate():
         while True:
@@ -162,10 +170,35 @@ if SIMULATE:
                 ask_qty   = random.randint(1, 200)
                 state.on_tick(price, ltq, bid_price, bid_qty, ask_price, ask_qty)
 
+            # CDS ticks (currency — fine decimals, tight spread)
+            for sym, state in engine.cds_symbols.items():
+                price     = cds_sims[sym].next_price()
+                ltq       = random.randint(1, 100)
+                spread    = price * 0.0005
+                bid_price = round(price - spread, 4)
+                ask_price = round(price + spread, 4)
+                bid_qty   = random.randint(1, 500)
+                ask_qty   = random.randint(1, 500)
+                state.on_tick(price, ltq, bid_price, bid_qty, ask_price, ask_qty)
+
+            # FNO ticks (index futures — larger notional, moderate spread)
+            for sym, state in engine.fno_symbols.items():
+                price     = fno_sims[sym].next_price()
+                ltq       = random.randint(50, 2000)
+                spread    = price * 0.0005
+                bid_price = round(price - spread, 2)
+                ask_price = round(price + spread, 2)
+                bid_qty   = random.randint(50, 5000)
+                ask_qty   = random.randint(50, 5000)
+                state.on_tick(price, ltq, bid_price, bid_qty, ask_price, ask_qty)
+
             time.sleep(0.5)
 
     threading.Thread(target=simulate, daemon=True).start()
-    logger.info(f"Simulating {len(nse_demo)} NSE stocks + {len(mcx_demo)} MCX commodities")
+    logger.info(
+        f"Simulating {len(nse_demo)} NSE stocks + {len(mcx_demo)} MCX commodities "
+        f"+ {len(cds_demo)} currency pairs + {len(fno_demo)} index futures"
+    )
 
 # ─────────────────────────────────────────────────────────────
 else:

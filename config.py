@@ -25,6 +25,33 @@ MCX_SYMBOLS = [
     "LEAD",
 ]
 
+# ── NSE Currency Derivatives Screening ────────────────────────
+CDS_LTP_MIN     = 0        # no lower bound (JPYINR quoted small, GBPINR larger)
+CDS_LTP_MAX     = 999_999  # no upper bound
+CDS_MIN_BID_QTY = 1        # currency lot depth is different from equity
+CDS_MIN_ASK_QTY = 1
+
+# Currency pairs to track (name as it appears in Angel One master)
+CDS_SYMBOLS = [
+    "USDINR",
+    "EURINR",
+    "GBPINR",
+    "JPYINR",
+]
+
+# ── NSE F&O Screening ──────────────────────────────────────────
+FNO_LTP_MIN     = 0
+FNO_LTP_MAX     = 999_999
+FNO_MIN_BID_QTY = 1
+FNO_MIN_ASK_QTY = 1
+
+# Index futures to track (name as it appears in Angel One master)
+FNO_SYMBOLS = [
+    "NIFTY",
+    "BANKNIFTY",
+    "FINNIFTY",
+]
+
 # ── SMMA Periods ──────────────────────────────────────────────
 SMMA_FAST   = 20
 SMMA_SLOW   = 120
@@ -47,6 +74,8 @@ WS_HOST     = "127.0.0.1"
 TICK_STORE_MINUTES  = 120
 NSE_SYMBOL_FILE     = "nse_symbols.csv"
 MCX_SYMBOL_FILE     = "mcx_symbols.csv"
+CDS_SYMBOL_FILE     = "cds_symbols.csv"
+FNO_SYMBOL_FILE     = "fno_symbols.csv"
 DB_PATH             = "smma_screener.db"
 LOG_FOLDER          = "logs"
 
@@ -56,7 +85,13 @@ WS_RECONNECT_DELAY  = 5    # seconds before reconnecting
 # ── Market Hours (IST) ────────────────────────────────────────
 # NSE Equity:   09:15 – 15:30
 # MCX:          09:00 – 23:30
+# NSE Currency: 09:00 – 17:00
+# NSE F&O:      09:15 – 15:30
 NSE_OPEN_H,  NSE_OPEN_M  = 9,  15
 NSE_CLOSE_H, NSE_CLOSE_M = 15, 30
 MCX_OPEN_H,  MCX_OPEN_M  = 9,  0
 MCX_CLOSE_H, MCX_CLOSE_M = 23, 30
+CDS_OPEN_H,  CDS_OPEN_M  = 9,  0
+CDS_CLOSE_H, CDS_CLOSE_M = 17, 0
+FNO_OPEN_H,  FNO_OPEN_M  = 9,  15
+FNO_CLOSE_H, FNO_CLOSE_M = 15, 30

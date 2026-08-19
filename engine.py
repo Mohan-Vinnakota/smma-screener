@@ -1,6 +1,6 @@
 """
 engine.py — Market Manager
-Coordinates all markets: NSE Equity + MCX Commodities.
+Coordinates all markets: NSE Equity + MCX Commodities + NSE Currency (CDS) + NSE F&O.
 Each market runs in its own thread.
 Shared ML model across all markets.
 get_rows() merges all markets for the dashboard.
@@ -14,6 +14,8 @@ from SmartApi import SmartConnect
 from ml_model import MLModel
 from market_nse_equity import NSEEquityMarket
 from market_mcx import MCXMarket
+from market_nse_currency import CDSMarket
+from market_nse_fno import FNOMarket
 from database import init_db
 from logger import logger
 from config import ML_MIN_SAMPLES
@@ -71,6 +73,18 @@ class Engine:
         self.markets["MCX"] = mcx
         threading.Thread(target=mcx.start, daemon=True, name="MCX").start()
         logger.info("MCX Commodities market started")
+
+        # NSE Currency Derivatives (09:00 – 17:00)
+        cds = CDSMarket(self.api, self.jwt, self.feed_tok, self.ml)
+        self.markets["CDS"] = cds
+        threading.Thread(target=cds.start, daemon=True, name="CDS").start()
+        logger.info("NSE Currency market started")
+
+        # NSE F&O index futures (09:15 – 15:30)
+        fno = FNOMarket(self.api, self.jwt, self.feed_tok, self.ml)
+        self.markets["FNO"] = fno
+        threading.Thread(target=fno.start, daemon=True, name="FNO").start()
+        logger.info("NSE F&O market started")
 
     # ── Dashboard data ────────────────────────────────────────
     def get_rows(self):
