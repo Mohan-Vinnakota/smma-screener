@@ -1,49 +1,46 @@
 """
-market_nse_currency.py
-NSE Currency Derivatives market module.
-Handles: symbol loading, screening, WebSocket tick stream, SMMA signals.
-Runs parallel to market_nse_equity.py / market_mcx.py — feeds into same
-ML model + dashboard.
+market_nse_equity.py
+NSE Equity market module — refactored from engine.py.
+Handles: screening, WebSocket ticks, SMMA signals for NSE stocks.
 
-CDS Exchange hours: 09:00 – 17:00 IST
-Angel One WebSocket exchangeType for CDS (currency) = 13
+NSE Equity hours: 09:15 – 15:30 IST
+Angel One WebSocket exchangeType for NSE = 1
 """
 
-import os
 import time
 import threading
 import pandas as pd
 from datetime import datetime
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 
-from indicators import CrossoverDetector
-from tick_store import TickStore
-from practice import Tick
-from ml_model import MLModel, CrossoverRecord
-from database import save_signal, update_signal_exit, save_screened_stock
+from core.indicators import CrossoverDetector
+from core.tick_store import TickStore
+from core.practice import Tick
+from core.ml_model import MLModel, CrossoverRecord
+from core.database import save_signal, update_signal_exit, save_screened_stock
 from logger import logger
 from config import (
-    CDS_SYMBOL_FILE, CDS_MIN_BID_QTY, CDS_MIN_ASK_QTY,
-    CDS_OPEN_H, CDS_OPEN_M, CDS_CLOSE_H, CDS_CLOSE_M,
-    WS_RECONNECT_DELAY, TICK_STORE_MINUTES
+    LTP_MIN, LTP_MAX, MIN_BID_QTY, MIN_ASK_QTY,
+    NSE_SYMBOL_FILE, WS_RECONNECT_DELAY, TICK_STORE_MINUTES,
+    NSE_OPEN_H, NSE_OPEN_M, NSE_CLOSE_H, NSE_CLOSE_M
 )
-from telegram_alert import send_alert, format_signal_alert
+from alerts.telegram_alert import send_alert, format_signal_alert
 
-MARKET = "CDS"
-EXCHANGE_TYPE = 13   # Angel One CDS (currency) exchange type for WebSocket
+MARKET = "NSE"
+EXCHANGE_TYPE = 1   # Angel One NSE exchange type for WebSocket
 
 
 # ── Market hours check ────────────────────────────────────────
-def is_cds_open():
+def is_nse_open():
     now = datetime.now()
-    open_mins  = CDS_OPEN_H  * 60 + CDS_OPEN_M
-    close_mins = CDS_CLOSE_H * 60 + CDS_CLOSE_M
+    open_mins  = NSE_OPEN_H  * 60 + NSE_OPEN_M
+    close_mins = NSE_CLOSE_H * 60 + NSE_CLOSE_M
     now_mins   = now.hour * 60 + now.minute
     return open_mins <= now_mins < close_mins
 
 
-# ── Per-symbol state (same pattern as NSE / MCX) ──────────────
-class CDSSymbolState:
+# ── Per-symbol state ──────────────────────────────────────────
+class SymbolState:
     def __init__(self, symbol, token, ml_model):
         self.symbol         = symbol
         self.token          = token
@@ -123,16 +120,14 @@ class CDSSymbolState:
         conf_str            = f"{conf:.0%}" if conf is not None else "n/a"
 
         logger.info(
-            f"💱 CDS SIGNAL {self.symbol}: {signal} @ ₹{ltp:,.4f} "
+            f"🚨 NSE SIGNAL {self.symbol}: {signal} @ ₹{ltp} "
             f"| {self.ml_verdict} ({conf_str})"
         )
 
         try:
-            msg = format_signal_alert(
-                f"[CDS] {self.symbol}", signal, ltp,
-                self.ml_verdict, self.ml_confidence
-            )
-            send_alert(msg)
+            msg = format_signal_alert(self.symbol, signal, ltp,
+                                      self.ml_verdict, self.ml_confidence)
+            send_alert(msg, verdict=self.ml_verdict)
         except Exception as e:
             logger.error(f"Telegram alert failed: {e}")
 
@@ -160,9 +155,9 @@ class CDSSymbolState:
 
         result = "WIN ✅" if trade.profitable else "LOSS ❌"
         logger.info(
-            f"📊 CDS CLOSED {self.symbol} {trade.signal} | "
-            f"Entry ₹{trade.entry_ltp:,.4f} → Exit ₹{exit_ltp:,.4f} | "
-            f"P&L ₹{trade.pnl:,.4f} | {result}"
+            f"📊 NSE CLOSED {self.symbol} {trade.signal} | "
+            f"Entry ₹{trade.entry_ltp} → Exit ₹{exit_ltp} | "
+            f"P&L ₹{trade.pnl:.2f} | {result}"
         )
         self.open_trade = None
 
@@ -176,99 +171,66 @@ class CDSSymbolState:
         )
 
 
-# ── CDS Market Engine ──────────────────────────────────────────
-class CDSMarket:
-    """
-    Manages all NSE Currency Derivatives symbols.
-    Call start() — it runs in its own thread.
-    get_rows() returns current state for the dashboard.
-    """
-
-    def __init__(self, api, jwt_token, feed_token, ml_model):
-        self.api        = api
-        self.jwt_token  = jwt_token
-        self.feed_token = feed_token
-        self.ml         = ml_model
-        self.symbols    = {}    # symbol_name → CDSSymbolState
-        self.token_map  = {}    # token_str   → symbol_name
-        self._ws_tokens = []
-
-    # ── Symbol loading ────────────────────────────────────────
-    def load_symbols(self):
-        if not os.path.exists(CDS_SYMBOL_FILE):
-            logger.error(
-                f"CDS symbol file '{CDS_SYMBOL_FILE}' not found. "
-                "Run: python cds_symbol_master.py"
-            )
-            return []
-
-        df = pd.read_csv(CDS_SYMBOL_FILE)
-        logger.info(f"CDS: loaded {len(df)} contracts from {CDS_SYMBOL_FILE}")
-        return df
-
-    # ── Screening ─────────────────────────────────────────────
+# ── NSE Market Engine ─────────────────────────────────────────
+class NSEEquityMarket:
+    def __init__(self, api, api_key, client_code, jwt_token, feed_token, ml_model):
+        self.api         = api
+        self.api_key     = api_key
+        self.client_code = client_code
+        self.jwt_token   = jwt_token
+        self.feed_token  = feed_token
+        self.ml          = ml_model
+        self.symbols     = {}
+        self.token_map   = {}
+        self._ws_tokens  = []
     def screen(self):
-        """Fetch latest quotes for all CDS symbols. No LTP filter — pairs vary in scale."""
-        df = self.load_symbols()
-        if df is None or df.empty:
-            return []
-
+        df         = pd.read_csv(NSE_SYMBOL_FILE)
         token_list = df["token"].astype(str).tolist()
-        passed = []
+        passed     = []
 
-        logger.info(f"CDS: screening {len(token_list)} contracts...")
+        logger.info(f"NSE: screening {len(token_list)} stocks...")
         for i in range(0, len(token_list), 50):
             batch = token_list[i:i + 50]
             try:
                 resp = self.api.getMarketData(
                     mode="FULL",
-                    exchangeTokens={"CDS": batch}
+                    exchangeTokens={"NSE": batch}
                 )
                 if resp.get("status"):
                     for q in resp["data"].get("fetched", []):
                         ltp     = q.get("ltp", 0)
-                        symbol  = q.get("tradingSymbol", "")
-                        token   = str(q.get("symbolToken", ""))
                         bid_qty = 0
                         ask_qty = 0
-                        bid_price = 0
-                        ask_price = 0
                         if q.get("depth"):
-                            buy_depth  = q["depth"].get("buy",  [{}])
-                            sell_depth = q["depth"].get("sell", [{}])
-                            if buy_depth:
-                                bid_qty   = buy_depth[0].get("quantity", 0)
-                                bid_price = buy_depth[0].get("price", 0) / 100
-                            if sell_depth:
-                                ask_qty   = sell_depth[0].get("quantity", 0)
-                                ask_price = sell_depth[0].get("price", 0) / 100
+                            buy_d  = q["depth"].get("buy",  [{}])
+                            sell_d = q["depth"].get("sell", [{}])
+                            bid_qty = buy_d[0].get("quantity", 0)  if buy_d  else 0
+                            ask_qty = sell_d[0].get("quantity", 0) if sell_d else 0
 
-                        if ltp > 0 and bid_qty >= CDS_MIN_BID_QTY and ask_qty >= CDS_MIN_ASK_QTY:
-                            passed.append({
-                                "symbol":    symbol,
-                                "token":     token,
-                                "ltp":       ltp,
-                                "bid_price": bid_price,
-                                "ask_price": ask_price,
-                                "bid_qty":   bid_qty,
-                                "ask_qty":   ask_qty,
-                            })
+                        if LTP_MIN <= ltp <= LTP_MAX:
+                            if bid_qty > MIN_BID_QTY and ask_qty > MIN_ASK_QTY:
+                                passed.append({
+                                    "symbol":  q["tradingSymbol"],
+                                    "token":   str(q["symbolToken"]),
+                                    "ltp":     ltp,
+                                    "bid_qty": bid_qty,
+                                    "ask_qty": ask_qty,
+                                })
             except Exception as e:
-                logger.error(f"CDS batch error: {e}")
+                logger.error(f"NSE batch error: {e}")
             time.sleep(0.1)
 
-        logger.info(f"CDS: {len(passed)} contracts active")
+        logger.info(f"NSE: {len(passed)} stocks passed filter")
         for s in passed:
             sym = s["symbol"]
             tok = s["token"]
             if sym not in self.symbols:
-                self.symbols[sym] = CDSSymbolState(sym, tok, self.ml)
+                self.symbols[sym] = SymbolState(sym, tok, self.ml)
             self.token_map[tok] = sym
             save_screened_stock(sym, s["ltp"], s["bid_qty"], s["ask_qty"], market=MARKET)
 
         return [s["token"] for s in passed]
 
-    # ── WebSocket ─────────────────────────────────────────────
     def _on_tick(self, wsapp, message):
         try:
             ltp   = message["last_traded_price"] / 100
@@ -279,43 +241,40 @@ class CDSMarket:
             if not symbol:
                 return
 
-            bid_price, bid_qty, ask_price, ask_qty = 0, 0, 0, 0
-            buy_data  = message.get("best_5_buy_data",  [])
-            sell_data = message.get("best_5_sell_data", [])
-            if buy_data:
-                bid_price = buy_data[0].get("price", 0) / 100
-                bid_qty   = buy_data[0].get("quantity", 0)
-            if sell_data:
-                ask_price = sell_data[0].get("price", 0) / 100
-                ask_qty   = sell_data[0].get("quantity", 0)
+            buy_data  = message.get("best_5_buy_data",  [{}])
+            sell_data = message.get("best_5_sell_data", [{}])
+            bid_price = buy_data[0].get("price", 0) / 100  if buy_data  else 0
+            bid_qty   = buy_data[0].get("quantity", 0)     if buy_data  else 0
+            ask_price = sell_data[0].get("price", 0) / 100 if sell_data else 0
+            ask_qty   = sell_data[0].get("quantity", 0)    if sell_data else 0
 
             if symbol in self.symbols:
                 self.symbols[symbol].on_tick(
                     ltp, ltq, bid_price, bid_qty, ask_price, ask_qty
                 )
         except Exception as e:
-            logger.error(f"CDS tick error: {e}")
+            logger.error(f"NSE tick error: {e}")
 
     def _connect_websocket(self):
         sws = SmartWebSocketV2(
-            self.jwt_token, self.feed_token  # API_KEY, CLIENT_ID passed via factory
+            self.jwt_token, self.api_key, self.client_code, self.feed_token
         )
 
         def on_open(wsapp):
-            logger.info("CDS WebSocket connected!")
-            sws.subscribe("cds_engine", 3,
+            logger.info("NSE WebSocket connected!")
+            sws.subscribe("nse_engine", 3,
                           [{"exchangeType": EXCHANGE_TYPE, "tokens": self._ws_tokens}])
 
         def on_error(wsapp, error):
-            logger.error(f"CDS WS Error: {error}")
+            logger.error(f"NSE WS Error: {error}")
 
         def on_close(wsapp):
-            logger.warning(f"CDS WS closed — reconnecting in {WS_RECONNECT_DELAY}s...")
+            logger.warning(f"NSE WS closed — reconnecting in {WS_RECONNECT_DELAY}s...")
             time.sleep(WS_RECONNECT_DELAY)
             try:
                 self._connect_websocket()
             except Exception as e:
-                logger.error(f"CDS reconnect failed: {e}")
+                logger.error(f"NSE reconnect failed: {e}")
 
         sws.on_open  = on_open
         sws.on_data  = self._on_tick
@@ -326,38 +285,31 @@ class CDSMarket:
     def _rescreen_loop(self):
         while True:
             time.sleep(30 * 60)
-            if not is_cds_open():
-                logger.info("CDS: market closed — skipping rescreen")
+            if not is_nse_open():
+                logger.info("NSE: market closed — skipping rescreen")
                 continue
-            logger.info("CDS: re-screening (30-min cycle)...")
+            logger.info("NSE: re-screening (30-min cycle)...")
             try:
                 new_tokens = self.screen()
                 if new_tokens:
                     self._ws_tokens = new_tokens
-                    logger.info(f"CDS rescreen complete — {len(new_tokens)} contracts active")
+                    logger.info(f"NSE rescreen complete — {len(new_tokens)} stocks active")
                 else:
-                    logger.warning("CDS rescreen: 0 contracts — keeping existing")
+                    logger.warning("NSE rescreen: 0 stocks — keeping existing")
             except Exception as e:
-                logger.error(f"CDS rescreen error: {e}")
+                logger.error(f"NSE rescreen error: {e}")
 
     def start(self):
-        """Call this in its own thread. Blocks on WebSocket."""
-        if not is_cds_open():
-            logger.info("CDS market is closed right now — will wait for open")
-            while not is_cds_open():
-                time.sleep(60)
-            logger.info("CDS market now open — starting")
-
+        """Blocks on WebSocket. Run in its own thread."""
         tokens = self.screen()
         if not tokens:
-            logger.warning("CDS: no contracts found — check cds_symbols.csv")
+            logger.warning("NSE: no stocks passed filter — check market hours")
             return
 
         self._ws_tokens = tokens
         threading.Thread(target=self._rescreen_loop, daemon=True).start()
-        self._connect_websocket()  # blocks
+        self._connect_websocket()
 
-    # ── Dashboard rows ────────────────────────────────────────
     def get_rows(self):
         rows = []
         for sym, state in self.symbols.items():
@@ -368,21 +320,21 @@ class CDSMarket:
             rows.append({
                 "market":      MARKET,
                 "symbol":      sym,
-                "ltp":         round(state.last_ltp, 4),
-                "smma_fast":   round(f, 4) if f else None,
-                "smma_slow":   round(s, 4) if s else None,
+                "ltp":         round(state.last_ltp, 2),
+                "smma_fast":   round(f, 2) if f else None,
+                "smma_slow":   round(s, 2) if s else None,
                 "signal":      state.signal,
                 "ml_verdict":  state.ml_verdict,
                 "ml_conf":     f"{state.ml_confidence:.0%}" if state.ml_confidence else None,
                 "ml_reason":   state.ml_reason,
-                "bid_price":   round(state.last_bid_price, 4),
+                "bid_price":   round(state.last_bid_price, 2),
                 "bid_qty":     state.last_bid_qty,
-                "ask_price":   round(state.last_ask_price, 4),
+                "ask_price":   round(state.last_ask_price, 2),
                 "ask_qty":     state.last_ask_qty,
                 "etq_5m":      state.store.etq(5),
                 "etq_20m":     state.store.etq(20),
                 "etq_60m":     state.store.etq(60),
-                "avg_ltp_20m": round(state.store.avg_ltp(20) or 0, 4),
-                "avg_ltp_60m": round(state.store.avg_ltp(60) or 0, 4),
+                "avg_ltp_20m": round(state.store.avg_ltp(20) or 0, 2),
+                "avg_ltp_60m": round(state.store.avg_ltp(60) or 0, 2),
             })
         return rows

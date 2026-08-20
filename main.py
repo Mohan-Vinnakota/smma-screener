@@ -6,9 +6,9 @@ import random
 import logging as _logging
 
 from logger import logger
-from engine import Engine
+from core.engine import Engine
 from server import start_servers, set_engine
-from database import init_db
+from core.database import init_db
 
 _logging.getLogger("werkzeug").setLevel(_logging.ERROR)
 
@@ -19,13 +19,13 @@ init_db()
 if SIMULATE:
     logger.info("=== SIMULATION MODE (NSE + MCX + CDS + FNO + CRYPTO + US) ===")
 
-    from market_nse_equity import SymbolState
-    from market_mcx import MCXSymbolState
-    from market_nse_currency import CDSSymbolState
-    from market_nse_fno import FNOSymbolState
-    from market_crypto import CryptoSymbolState
-    from market_us import USSymbolState
-    from ml_model import MLModel
+    from markets.market_nse_equity import SymbolState
+    from markets.market_mcx import MCXSymbolState
+    from markets.market_nse_currency import CDSSymbolState
+    from markets.market_nse_fno import FNOSymbolState
+    from markets.market_crypto import CryptoSymbolState
+    from markets.market_us import USSymbolState
+    from core.ml_model import MLModel
     from config import ML_MIN_SAMPLES
 
     shared_ml = MLModel(min_samples=ML_MIN_SAMPLES)

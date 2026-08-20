@@ -34,8 +34,8 @@ import sys
 import argparse
 import numpy as np
 
-from database import get_closed_signals_with_features, init_db
-from ml_model import FEATURE_NAMES
+from core.database import get_closed_signals_with_features, init_db
+from core.ml_model import FEATURE_NAMES
 from config import ML_BACKTEST_TEST_FRACTION, ML_CONFIDENCE_THRESHOLD, ML_TRUST_SAMPLES
 from logger import logger
 

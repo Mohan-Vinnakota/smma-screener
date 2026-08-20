@@ -5,7 +5,7 @@ import websockets
 from flask import Flask, jsonify, send_from_directory, request
 from config import HTTP_HOST, HTTP_PORT, WS_HOST, WS_PORT
 from logger import logger
-from database import get_all_signals
+from core.database import get_all_signals
 import logging as _logging
 _logging.getLogger("werkzeug").setLevel(_logging.ERROR)
 

@@ -12,14 +12,14 @@ import json
 import pyotp
 from SmartApi import SmartConnect
 
-from ml_model import MLModel
-from market_nse_equity import NSEEquityMarket
-from market_mcx import MCXMarket
-from market_nse_currency import CDSMarket
-from market_nse_fno import FNOMarket
-from market_crypto import CryptoMarket
-from market_us import USMarket
-from database import init_db
+from core.ml_model import MLModel
+from markets.market_nse_equity import NSEEquityMarket
+from markets.market_mcx import MCXMarket
+from markets.market_nse_currency import CDSMarket
+from markets.market_nse_fno import FNOMarket
+from markets.market_crypto import CryptoMarket
+from markets.market_us import USMarket
+from core.database import init_db
 from logger import logger
 from config import ML_MIN_SAMPLES
 
@@ -88,25 +88,25 @@ class Engine:
             return
 
         # NSE Equity (09:15 – 15:30)
-        nse = NSEEquityMarket(self.api, self.jwt, self.feed_tok, self.ml)
+        nse = NSEEquityMarket(self.api, API_KEY, CLIENT_ID, self.jwt, self.feed_tok, self.ml)
         self.markets["NSE"] = nse
         threading.Thread(target=nse.start, daemon=True, name="NSE").start()
         logger.info("NSE Equity market started")
 
         # MCX Commodities (09:00 – 23:30)
-        mcx = MCXMarket(self.api, self.jwt, self.feed_tok, self.ml)
+        mcx = MCXMarket(self.api, API_KEY, CLIENT_ID, self.jwt, self.feed_tok, self.ml)
         self.markets["MCX"] = mcx
         threading.Thread(target=mcx.start, daemon=True, name="MCX").start()
         logger.info("MCX Commodities market started")
 
         # NSE Currency Derivatives (09:00 – 17:00)
-        cds = CDSMarket(self.api, self.jwt, self.feed_tok, self.ml)
+        cds = CDSMarket(self.api, API_KEY, CLIENT_ID, self.jwt, self.feed_tok, self.ml)
         self.markets["CDS"] = cds
         threading.Thread(target=cds.start, daemon=True, name="CDS").start()
         logger.info("NSE Currency market started")
 
         # NSE F&O index futures (09:15 – 15:30)
-        fno = FNOMarket(self.api, self.jwt, self.feed_tok, self.ml)
+        fno = CDSMarket(self.api, API_KEY, CLIENT_ID, self.jwt, self.feed_tok, self.ml)
         self.markets["FNO"] = fno
         threading.Thread(target=fno.start, daemon=True, name="FNO").start()
         logger.info("NSE F&O market started")

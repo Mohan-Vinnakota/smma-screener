@@ -1,7 +1,7 @@
 from collections import deque
 import time
 import threading
-from practice import Tick
+from core.practice import Tick
 
 class TickStore:
     """Thread-safe: add() runs on the market's own thread as ticks

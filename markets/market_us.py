@@ -1,55 +1,70 @@
 """
-market_crypto.py
-Crypto market module (Binance).
-Handles: symbol loading, WebSocket tick stream (public, no login needed),
-SMMA signals. Runs parallel to the NSE/MCX/CDS/FNO modules — feeds into
-the same ML model + dashboard.
+market_us.py
+US Equities market module (Alpaca).
+Handles: symbol loading, WebSocket auth + tick stream, SMMA signals.
+Runs parallel to the NSE/MCX/CDS/FNO/Crypto modules — feeds into the
+same ML model + dashboard.
 
-Crypto trades 24/7 — there is no market-hours gate.
-Uses Binance's public combined WebSocket ticker stream — no API key
-or account needed just to watch prices and generate signals.
+US Equity hours: 09:30 - 16:00 US/Eastern (regular session only; no
+pre/post-market here). Unlike crypto, this needs an Alpaca API
+key/secret even just to read prices — add alpaca_api_key and
+alpaca_api_secret to credentials.json (free paper-trading keys from
+https://alpaca.markets work fine, nothing gets traded here).
 
-If you later want this to place real orders on your Binance account,
-that needs an API key from Binance → Profile → API Management, added
-to credentials.json as binance_api_key / binance_api_secret. Nothing
-in this file uses that yet — it's pure market-data watching, same as
---simulate mode but with real live prices.
+Uses Alpaca's Market Data v2 WebSocket (IEX feed, free tier) for
+trade + quote ticks.
 """
 
 import time
-import threading
 import json
+import threading
 import pandas as pd
 import websocket  # websocket-client package, already in requirements.txt
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-from indicators import CrossoverDetector
-from tick_store import TickStore
-from practice import Tick
-from ml_model import MLModel, CrossoverRecord
-from database import save_signal, update_signal_exit, save_screened_stock
+from core.indicators import CrossoverDetector
+from core.tick_store import TickStore
+from core.practice import Tick
+from core.ml_model import MLModel, CrossoverRecord
+from core.database import save_signal, update_signal_exit, save_screened_stock
 from logger import logger
 from config import (
-    CRYPTO_SYMBOL_FILE, BINANCE_WS_BASE,
-    WS_RECONNECT_DELAY, TICK_STORE_MINUTES
+    US_SYMBOL_FILE, ALPACA_DATA_WS_BASE, ALPACA_DATA_FEED,
+    WS_RECONNECT_DELAY, TICK_STORE_MINUTES,
+    US_OPEN_H, US_OPEN_M, US_CLOSE_H, US_CLOSE_M
 )
-from telegram_alert import send_alert, format_signal_alert
+from alerts.telegram_alert import send_alert, format_signal_alert
 
-MARKET = "CRYPTO"
+MARKET = "US"
+US_EASTERN = ZoneInfo("America/New_York")
+
+with open("credentials.json") as f:
+    _creds = json.load(f)
+
+ALPACA_KEY    = _creds.get("alpaca_api_key")
+ALPACA_SECRET = _creds.get("alpaca_api_secret")
 
 
 # ── Market hours check ────────────────────────────────────────
-def is_crypto_open():
-    """Crypto trades 24/7 — always open. Kept for interface parity
-    with the other market modules (engine.py doesn't need to know
-    this market never closes)."""
-    return True
+def is_us_open():
+    """Regular US equity session, 09:30-16:00, Mon-Fri, US/Eastern.
+    Computed against America/New_York directly (not a fixed IST
+    offset) so it stays correct across US daylight-saving changes."""
+    now = datetime.now(US_EASTERN)
+    if now.weekday() >= 5:   # Sat/Sun
+        return False
+    open_mins  = US_OPEN_H  * 60 + US_OPEN_M
+    close_mins = US_CLOSE_H * 60 + US_CLOSE_M
+    now_mins   = now.hour * 60 + now.minute
+    return open_mins <= now_mins < close_mins
 
 
-# ── Per-symbol state (same pattern as NSE / MCX / CDS / FNO) ──
-class CryptoSymbolState:
+# ── Per-symbol state (same pattern as NSE / MCX / CDS / FNO / Crypto) ──
+class USSymbolState:
     def __init__(self, symbol, token, ml_model):
         self.symbol         = symbol
-        self.token          = token   # Binance has no numeric token; symbol doubles as its own id
+        self.token          = token   # Alpaca has no numeric token; symbol doubles as its own id
         self.ml             = ml_model
         self.detector       = CrossoverDetector()
         self.store          = TickStore(max_minutes=TICK_STORE_MINUTES)
@@ -126,16 +141,16 @@ class CryptoSymbolState:
         conf_str            = f"{conf:.0%}" if conf is not None else "n/a"
 
         logger.info(
-            f"🪙 CRYPTO SIGNAL {self.symbol}: {signal} @ ${ltp:,.2f} "
+            f"🇺🇸 US SIGNAL {self.symbol}: {signal} @ ${ltp:,.2f} "
             f"| {self.ml_verdict} ({conf_str})"
         )
 
         try:
             msg = format_signal_alert(
-                f"[CRYPTO] {self.symbol}", signal, ltp,
+                f"[US] {self.symbol}", signal, ltp,
                 self.ml_verdict, self.ml_confidence
             )
-            send_alert(msg)
+            send_alert(msg, verdict=self.ml_verdict)
         except Exception as e:
             logger.error(f"Telegram alert failed: {e}")
 
@@ -163,7 +178,7 @@ class CryptoSymbolState:
 
         result = "WIN ✅" if trade.profitable else "LOSS ❌"
         logger.info(
-            f"📊 CRYPTO CLOSED {self.symbol} {trade.signal} | "
+            f"📊 US CLOSED {self.symbol} {trade.signal} | "
             f"Entry ${trade.entry_ltp:,.2f} → Exit ${exit_ltp:,.2f} | "
             f"P&L ${trade.pnl:,.2f} | {result}"
         )
@@ -179,37 +194,43 @@ class CryptoSymbolState:
         )
 
 
-# ── Crypto Market Engine ────────────────────────────────────────
-class CryptoMarket:
+# ── US Equities Market Engine ───────────────────────────────────
+class USMarket:
     """
-    Manages all crypto symbols via Binance's public WebSocket.
-    No login required — no api/jwt_token/feed_token needed, unlike
-    the Angel One markets. Call start() — it runs in its own thread.
+    Manages all US equity symbols via Alpaca's Market Data WebSocket.
+    Requires alpaca_api_key / alpaca_api_secret in credentials.json —
+    unlike crypto, Alpaca's feed is authenticated even for read-only
+    market data. Call start() — it runs in its own thread.
     get_rows() returns current state for the dashboard.
+
+    Outside 09:30-16:00 ET the exchange itself is closed, so no
+    trade/quote ticks arrive — the WebSocket connection stays open
+    (Alpaca allows this) and rows simply stop updating, same as how
+    the NSE modules go quiet outside their own market hours.
     """
 
     def __init__(self, ml_model):
-        self.ml         = ml_model
-        self.symbols    = {}    # symbol_name → CryptoSymbolState
-        self._ws        = None
-        self._stop      = False
+        self.ml      = ml_model
+        self.symbols = {}    # symbol_name → USSymbolState
+        self._ws     = None
+        self._stop   = False
 
     # ── Symbol loading ────────────────────────────────────────
     def load_symbols(self):
         import os
-        if not os.path.exists(CRYPTO_SYMBOL_FILE):
+        if not os.path.exists(US_SYMBOL_FILE):
             logger.error(
-                f"Crypto symbol file '{CRYPTO_SYMBOL_FILE}' not found. "
-                "Run: python crypto_symbol_master.py"
+                f"US symbol file '{US_SYMBOL_FILE}' not found. "
+                "Run: python us_symbol_master.py"
             )
-            return []
-        df = pd.read_csv(CRYPTO_SYMBOL_FILE)
-        logger.info(f"CRYPTO: loaded {len(df)} pairs from {CRYPTO_SYMBOL_FILE}")
+            return None
+        df = pd.read_csv(US_SYMBOL_FILE)
+        logger.info(f"US: loaded {len(df)} tickers from {US_SYMBOL_FILE}")
         return df
 
     def screen(self):
-        """Crypto majors trade continuously — no LTP/qty filter needed,
-        unlike NSE equity. Just registers each configured symbol."""
+        """Configured watchlist, same as crypto — no LTP/qty filter
+        needed since these are a fixed set of large-cap tickers."""
         df = self.load_symbols()
         if df is None or len(df) == 0:
             return []
@@ -217,57 +238,89 @@ class CryptoMarket:
         symbols = df["symbol"].tolist()
         for sym in symbols:
             if sym not in self.symbols:
-                self.symbols[sym] = CryptoSymbolState(sym, sym, self.ml)
-        logger.info(f"CRYPTO: tracking {len(symbols)} pairs")
+                self.symbols[sym] = USSymbolState(sym, sym, self.ml)
+        logger.info(f"US: tracking {len(symbols)} tickers")
         return symbols
 
     # ── WebSocket ─────────────────────────────────────────────
     def _on_message(self, ws, message):
         try:
             payload = json.loads(message)
-            data = payload.get("data", payload)  # combined stream wraps in {"stream","data"}
+            msgs = payload if isinstance(payload, list) else [payload]
 
-            symbol = data.get("s", "")
-            if symbol not in self.symbols:
-                return
+            for data in msgs:
+                msg_type = data.get("T")
 
-            ltp       = float(data.get("c", 0))   # last price
-            bid_price = float(data.get("b", 0))   # best bid price
-            bid_qty   = float(data.get("B", 0))   # best bid qty
-            ask_price = float(data.get("a", 0))   # best ask price
-            ask_qty   = float(data.get("A", 0))   # best ask qty
+                if msg_type == "success":
+                    logger.info(f"US WS: {data.get('msg')}")
+                    continue
+                if msg_type == "error":
+                    logger.error(f"US WS error: {data.get('msg')} (code {data.get('code')})")
+                    continue
 
-            if ltp <= 0:
-                return
+                symbol = data.get("S", "")
+                if symbol not in self.symbols:
+                    continue
 
-            self.symbols[symbol].on_tick(
-                ltp, ltq=1, bid_price=bid_price, bid_qty=bid_qty,
-                ask_price=ask_price, ask_qty=ask_qty
-            )
+                if msg_type == "t":       # trade tick
+                    ltp = float(data.get("p", 0))
+                    ltq = float(data.get("s", 1))
+                    if ltp <= 0:
+                        continue
+                    state = self.symbols[symbol]
+                    state.on_tick(
+                        ltp, ltq=ltq,
+                        bid_price=state.last_bid_price, bid_qty=state.last_bid_qty,
+                        ask_price=state.last_ask_price, ask_qty=state.last_ask_qty,
+                    )
+                    save_screened_stock(symbol, ltp, state.last_bid_qty, state.last_ask_qty, market=MARKET)
 
-            save_screened_stock(symbol, ltp, bid_qty, ask_qty, market=MARKET)
+                elif msg_type == "q":     # quote tick — updates bid/ask only
+                    state = self.symbols[symbol]
+                    state.last_bid_price = float(data.get("bp", 0))
+                    state.last_bid_qty   = float(data.get("bs", 0))
+                    state.last_ask_price = float(data.get("ap", 0))
+                    state.last_ask_qty   = float(data.get("as", 0))
+
         except Exception as e:
-            logger.error(f"CRYPTO tick error: {e}")
+            logger.error(f"US tick error: {e}")
 
     def _connect_websocket(self, symbols):
-        streams = "/".join(f"{s.lower()}@ticker" for s in symbols)
-        url = f"{BINANCE_WS_BASE}/stream?streams={streams}"
+        if not ALPACA_KEY or not ALPACA_SECRET:
+            logger.error(
+                "US: alpaca_api_key / alpaca_api_secret missing from "
+                "credentials.json — skipping US market"
+            )
+            return
+
+        url = f"{ALPACA_DATA_WS_BASE}/{ALPACA_DATA_FEED}"
 
         def on_open(ws):
-            logger.info(f"CRYPTO WebSocket connected! Streaming {len(symbols)} pairs")
+            logger.info("US WebSocket connected — authenticating...")
+            ws.send(json.dumps({
+                "action": "auth",
+                "key": ALPACA_KEY,
+                "secret": ALPACA_SECRET,
+            }))
+            ws.send(json.dumps({
+                "action": "subscribe",
+                "trades": symbols,
+                "quotes": symbols,
+            }))
+            logger.info(f"US: subscribed to {len(symbols)} tickers")
 
         def on_error(ws, error):
-            logger.error(f"CRYPTO WS Error: {error}")
+            logger.error(f"US WS Error: {error}")
 
         def on_close(ws, close_status_code, close_msg):
             if self._stop:
                 return
-            logger.warning(f"CRYPTO WS closed — reconnecting in {WS_RECONNECT_DELAY}s...")
+            logger.warning(f"US WS closed — reconnecting in {WS_RECONNECT_DELAY}s...")
             time.sleep(WS_RECONNECT_DELAY)
             try:
                 self._connect_websocket(symbols)
             except Exception as e:
-                logger.error(f"CRYPTO reconnect failed: {e}")
+                logger.error(f"US reconnect failed: {e}")
 
         self._ws = websocket.WebSocketApp(
             url,
@@ -279,27 +332,33 @@ class CryptoMarket:
         self._ws.run_forever()  # blocks
 
     def start(self):
-        """Call this in its own thread. Blocks on WebSocket. No market-hours
-        wait — crypto is always open."""
+        """Call this in its own thread. Blocks on WebSocket."""
         symbols = self.screen()
         if not symbols:
-            logger.warning("CRYPTO: no pairs found — check crypto_symbols.csv")
+            logger.warning("US: no tickers found — check us_symbols.csv")
             return
+
+        if not is_us_open():
+            logger.info(
+                "US: market currently closed (regular session is "
+                "09:30-16:00 US/Eastern, Mon-Fri) — connecting anyway, "
+                "rows will populate once trading resumes"
+            )
 
         threading.Thread(target=self._rescreen_loop, daemon=True).start()
         self._connect_websocket(symbols)
 
     def _rescreen_loop(self):
         """Periodically re-validate the symbol list (catches new/delisted
-        pairs). Less critical than for MCX/CDS since Binance majors rarely
-        change, but kept for consistency."""
+        tickers). Less critical than for MCX/CDS since this is a fixed
+        large-cap watchlist, kept for consistency."""
         while True:
-            time.sleep(60 * 60)  # hourly is plenty for crypto majors
-            logger.info("CRYPTO: re-checking symbol list...")
+            time.sleep(60 * 60)  # hourly is plenty for a fixed watchlist
+            logger.info("US: re-checking symbol list...")
             try:
                 self.screen()
             except Exception as e:
-                logger.error(f"CRYPTO rescreen error: {e}")
+                logger.error(f"US rescreen error: {e}")
 
     def stop(self):
         self._stop = True

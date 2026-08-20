@@ -114,7 +114,7 @@ class MLModel:
         *current* run — every restart threw away all prior training
         signal even though it was sitting in the DB the whole time.
         Call once at startup, before the app starts taking new ticks."""
-        from database import get_closed_signals_with_features
+        from core.database import get_closed_signals_with_features
         rows = get_closed_signals_with_features()
         if not rows:
             return

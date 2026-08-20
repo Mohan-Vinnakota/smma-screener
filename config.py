@@ -123,15 +123,15 @@ HTTP_PORT   = 5000
 WS_PORT     = 8765
 HTTP_HOST   = "127.0.0.1"
 WS_HOST     = "127.0.0.1"
-
+TELEGRAM_ACCEPT_ONLY = True   # False = send all signals including AVOID/Learning
 # ── Data ──────────────────────────────────────────────────────
 TICK_STORE_MINUTES  = 120
-NSE_SYMBOL_FILE     = "nse_symbols.csv"
-MCX_SYMBOL_FILE     = "mcx_symbols.csv"
-CDS_SYMBOL_FILE     = "cds_symbols.csv"
-FNO_SYMBOL_FILE     = "fno_symbols.csv"
-CRYPTO_SYMBOL_FILE  = "crypto_symbols.csv"
-US_SYMBOL_FILE      = "us_symbols.csv"
+NSE_SYMBOL_FILE    = "symbols/nse_symbols.csv"
+MCX_SYMBOL_FILE    = "symbols/mcx_symbols.csv"
+CDS_SYMBOL_FILE    = "symbols/cds_symbols.csv"
+FNO_SYMBOL_FILE    = "symbols/fno_symbols.csv"
+CRYPTO_SYMBOL_FILE = "symbols/crypto_symbols.csv"
+US_SYMBOL_FILE     = "symbols/us_symbols.csv"
 DB_PATH             = "smma_screener.db"
 LOG_FOLDER          = "logs"
 

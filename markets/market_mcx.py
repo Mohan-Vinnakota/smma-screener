@@ -1,12 +1,11 @@
 """
-market_nse_fno.py
-NSE Futures & Options market module (index futures: NIFTY, BANKNIFTY, FINNIFTY).
+market_mcx.py
+MCX Commodities market module.
 Handles: symbol loading, screening, WebSocket tick stream, SMMA signals.
-Runs parallel to market_nse_equity.py / market_mcx.py / market_nse_currency.py
-— feeds into same ML model + dashboard.
+Runs parallel to market_nse_equity.py — feeds into same ML model + dashboard.
 
-F&O Exchange hours: 09:15 – 15:30 IST
-Angel One WebSocket exchangeType for NFO (F&O) = 2
+MCX Exchange hours: 09:00 – 23:30 IST
+Angel One WebSocket exchangeType for MCX = 5
 """
 
 import os
@@ -16,34 +15,34 @@ import pandas as pd
 from datetime import datetime
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 
-from indicators import CrossoverDetector
-from tick_store import TickStore
-from practice import Tick
-from ml_model import MLModel, CrossoverRecord
-from database import save_signal, update_signal_exit, save_screened_stock
+from core.indicators import CrossoverDetector
+from core.tick_store import TickStore
+from core.practice import Tick
+from core.ml_model import MLModel, CrossoverRecord
+from core.database import save_signal, update_signal_exit, save_screened_stock
 from logger import logger
 from config import (
-    FNO_SYMBOL_FILE, FNO_MIN_BID_QTY, FNO_MIN_ASK_QTY,
-    FNO_OPEN_H, FNO_OPEN_M, FNO_CLOSE_H, FNO_CLOSE_M,
+    MCX_SYMBOL_FILE, MCX_MIN_BID_QTY, MCX_MIN_ASK_QTY,
+    MCX_OPEN_H, MCX_OPEN_M, MCX_CLOSE_H, MCX_CLOSE_M,
     WS_RECONNECT_DELAY, TICK_STORE_MINUTES
 )
-from telegram_alert import send_alert, format_signal_alert
+from alerts.telegram_alert import send_alert, format_signal_alert
 
-MARKET = "FNO"
-EXCHANGE_TYPE = 2   # Angel One NFO exchange type for WebSocket
+MARKET = "MCX"
+EXCHANGE_TYPE = 5   # Angel One MCX exchange type for WebSocket
 
 
 # ── Market hours check ────────────────────────────────────────
-def is_fno_open():
+def is_mcx_open():
     now = datetime.now()
-    open_mins  = FNO_OPEN_H  * 60 + FNO_OPEN_M
-    close_mins = FNO_CLOSE_H * 60 + FNO_CLOSE_M
+    open_mins  = MCX_OPEN_H  * 60 + MCX_OPEN_M
+    close_mins = MCX_CLOSE_H * 60 + MCX_CLOSE_M
     now_mins   = now.hour * 60 + now.minute
     return open_mins <= now_mins < close_mins
 
 
-# ── Per-symbol state (same pattern as NSE / MCX / CDS) ────────
-class FNOSymbolState:
+# ── Per-symbol state (same pattern as NSE) ────────────────────
+class MCXSymbolState:
     def __init__(self, symbol, token, ml_model):
         self.symbol         = symbol
         self.token          = token
@@ -123,16 +122,16 @@ class FNOSymbolState:
         conf_str            = f"{conf:.0%}" if conf is not None else "n/a"
 
         logger.info(
-            f"📈 FNO SIGNAL {self.symbol}: {signal} @ ₹{ltp:,.2f} "
+            f"🛢️  MCX SIGNAL {self.symbol}: {signal} @ ₹{ltp:,.2f} "
             f"| {self.ml_verdict} ({conf_str})"
         )
 
         try:
             msg = format_signal_alert(
-                f"[FNO] {self.symbol}", signal, ltp,
+                f"[MCX] {self.symbol}", signal, ltp,
                 self.ml_verdict, self.ml_confidence
             )
-            send_alert(msg)
+            send_alert(msg, verdict=self.ml_verdict)
         except Exception as e:
             logger.error(f"Telegram alert failed: {e}")
 
@@ -160,7 +159,7 @@ class FNOSymbolState:
 
         result = "WIN ✅" if trade.profitable else "LOSS ❌"
         logger.info(
-            f"📊 FNO CLOSED {self.symbol} {trade.signal} | "
+            f"📊 MCX CLOSED {self.symbol} {trade.signal} | "
             f"Entry ₹{trade.entry_ltp:,.2f} → Exit ₹{exit_ltp:,.2f} | "
             f"P&L ₹{trade.pnl:,.2f} | {result}"
         )
@@ -176,39 +175,41 @@ class FNOSymbolState:
         )
 
 
-# ── FNO Market Engine ──────────────────────────────────────────
-class FNOMarket:
+# ── MCX Market Engine ─────────────────────────────────────────
+class MCXMarket:
     """
-    Manages all NSE F&O index-future symbols.
+    Manages all MCX commodity symbols.
     Call start() — it runs in its own thread.
     get_rows() returns current state for the dashboard.
     """
 
-    def __init__(self, api, jwt_token, feed_token, ml_model):
-        self.api        = api
-        self.jwt_token  = jwt_token
-        self.feed_token = feed_token
-        self.ml         = ml_model
-        self.symbols    = {}    # symbol_name → FNOSymbolState
-        self.token_map  = {}    # token_str   → symbol_name
-        self._ws_tokens = []
+    def __init__(self, api, api_key, client_code, jwt_token, feed_token, ml_model):
+        self.api         = api
+        self.api_key     = api_key
+        self.client_code = client_code
+        self.jwt_token   = jwt_token
+        self.feed_token  = feed_token
+        self.ml          = ml_model
+        self.symbols     = {}
+        self.token_map   = {}
+        self._ws_tokens  = []
 
     # ── Symbol loading ────────────────────────────────────────
     def load_symbols(self):
-        if not os.path.exists(FNO_SYMBOL_FILE):
+        if not os.path.exists(MCX_SYMBOL_FILE):
             logger.error(
-                f"F&O symbol file '{FNO_SYMBOL_FILE}' not found. "
-                "Run: python fno_symbol_master.py"
+                f"MCX symbol file '{MCX_SYMBOL_FILE}' not found. "
+                "Run: python mcx_symbol_master.py"
             )
-            return []
+            return None
 
-        df = pd.read_csv(FNO_SYMBOL_FILE)
-        logger.info(f"FNO: loaded {len(df)} contracts from {FNO_SYMBOL_FILE}")
+        df = pd.read_csv(MCX_SYMBOL_FILE)
+        logger.info(f"MCX: loaded {len(df)} contracts from {MCX_SYMBOL_FILE}")
         return df
 
     # ── Screening ─────────────────────────────────────────────
     def screen(self):
-        """Fetch latest quotes for all F&O symbols. No LTP filter — indices vary wildly."""
+        """Fetch latest quotes for all MCX symbols. No LTP filter — commodities vary wildly."""
         df = self.load_symbols()
         if df is None or df.empty:
             return []
@@ -216,13 +217,13 @@ class FNOMarket:
         token_list = df["token"].astype(str).tolist()
         passed = []
 
-        logger.info(f"FNO: screening {len(token_list)} contracts...")
+        logger.info(f"MCX: screening {len(token_list)} contracts...")
         for i in range(0, len(token_list), 50):
             batch = token_list[i:i + 50]
             try:
                 resp = self.api.getMarketData(
                     mode="FULL",
-                    exchangeTokens={"NFO": batch}
+                    exchangeTokens={"MCX": batch}
                 )
                 if resp.get("status"):
                     for q in resp["data"].get("fetched", []):
@@ -243,7 +244,7 @@ class FNOMarket:
                                 ask_qty   = sell_depth[0].get("quantity", 0)
                                 ask_price = sell_depth[0].get("price", 0) / 100
 
-                        if ltp > 0 and bid_qty >= FNO_MIN_BID_QTY and ask_qty >= FNO_MIN_ASK_QTY:
+                        if ltp > 0 and bid_qty >= MCX_MIN_BID_QTY and ask_qty >= MCX_MIN_ASK_QTY:
                             passed.append({
                                 "symbol":    symbol,
                                 "token":     token,
@@ -254,15 +255,15 @@ class FNOMarket:
                                 "ask_qty":   ask_qty,
                             })
             except Exception as e:
-                logger.error(f"FNO batch error: {e}")
+                logger.error(f"MCX batch error: {e}")
             time.sleep(0.1)
 
-        logger.info(f"FNO: {len(passed)} contracts active")
+        logger.info(f"MCX: {len(passed)} contracts active")
         for s in passed:
             sym = s["symbol"]
             tok = s["token"]
             if sym not in self.symbols:
-                self.symbols[sym] = FNOSymbolState(sym, tok, self.ml)
+                self.symbols[sym] = MCXSymbolState(sym, tok, self.ml)
             self.token_map[tok] = sym
             save_screened_stock(sym, s["ltp"], s["bid_qty"], s["ask_qty"], market=MARKET)
 
@@ -294,28 +295,28 @@ class FNOMarket:
                     ltp, ltq, bid_price, bid_qty, ask_price, ask_qty
                 )
         except Exception as e:
-            logger.error(f"FNO tick error: {e}")
+            logger.error(f"MCX tick error: {e}")
 
     def _connect_websocket(self):
         sws = SmartWebSocketV2(
-            self.jwt_token, self.feed_token  # API_KEY, CLIENT_ID passed via factory
+            self.jwt_token, self.api_key, self.client_code, self.feed_token  # API_KEY, CLIENT_ID passed via factory
         )
 
         def on_open(wsapp):
-            logger.info("FNO WebSocket connected!")
-            sws.subscribe("fno_engine", 3,
+            logger.info("MCX WebSocket connected!")
+            sws.subscribe("mcx_engine", 3,
                           [{"exchangeType": EXCHANGE_TYPE, "tokens": self._ws_tokens}])
 
         def on_error(wsapp, error):
-            logger.error(f"FNO WS Error: {error}")
+            logger.error(f"MCX WS Error: {error}")
 
         def on_close(wsapp):
-            logger.warning(f"FNO WS closed — reconnecting in {WS_RECONNECT_DELAY}s...")
+            logger.warning(f"MCX WS closed — reconnecting in {WS_RECONNECT_DELAY}s...")
             time.sleep(WS_RECONNECT_DELAY)
             try:
                 self._connect_websocket()
             except Exception as e:
-                logger.error(f"FNO reconnect failed: {e}")
+                logger.error(f"MCX reconnect failed: {e}")
 
         sws.on_open  = on_open
         sws.on_data  = self._on_tick
@@ -326,31 +327,32 @@ class FNOMarket:
     def _rescreen_loop(self):
         while True:
             time.sleep(30 * 60)
-            if not is_fno_open():
-                logger.info("FNO: market closed — skipping rescreen")
+            if not is_mcx_open():
+                logger.info("MCX: market closed — skipping rescreen")
                 continue
-            logger.info("FNO: re-screening (30-min cycle)...")
+            logger.info("MCX: re-screening (30-min cycle)...")
             try:
                 new_tokens = self.screen()
                 if new_tokens:
                     self._ws_tokens = new_tokens
-                    logger.info(f"FNO rescreen complete — {len(new_tokens)} contracts active")
+                    logger.info(f"MCX rescreen complete — {len(new_tokens)} contracts active")
                 else:
-                    logger.warning("FNO rescreen: 0 contracts — keeping existing")
+                    logger.warning("MCX rescreen: 0 contracts — keeping existing")
             except Exception as e:
-                logger.error(f"FNO rescreen error: {e}")
+                logger.error(f"MCX rescreen error: {e}")
 
     def start(self):
         """Call this in its own thread. Blocks on WebSocket."""
-        if not is_fno_open():
-            logger.info("FNO market is closed right now — will wait for open")
-            while not is_fno_open():
+        if not is_mcx_open():
+            logger.info("MCX market is closed right now — will wait for open")
+            # Wait in a loop until market opens then start
+            while not is_mcx_open():
                 time.sleep(60)
-            logger.info("FNO market now open — starting")
+            logger.info("MCX market now open — starting")
 
         tokens = self.screen()
         if not tokens:
-            logger.warning("FNO: no contracts found — check fno_symbols.csv")
+            logger.warning("MCX: no contracts found — check mcx_symbols.csv")
             return
 
         self._ws_tokens = tokens
