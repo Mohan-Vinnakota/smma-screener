@@ -328,7 +328,10 @@ function renderLive() {
 }
 
 // ── WebSocket for live rows ───────────────────────────────────
-const ws = new WebSocket("ws://127.0.0.1:8765");
+const wsUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? 'ws://127.0.0.1:8765'
+  : `wss://${window.location.hostname}:8765`;
+const ws = new WebSocket(wsUrl);
 
 ws.onopen = () => {
   const el = document.getElementById("ws-status");
