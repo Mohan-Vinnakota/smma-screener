@@ -1,15 +1,16 @@
 import json
-import asyncio
 import threading
-import websockets
+import time
 from flask import Flask, jsonify, send_from_directory, request
-from config import HTTP_HOST, HTTP_PORT, WS_HOST, WS_PORT
+from flask_sock import Sock
+from config import HTTP_HOST, HTTP_PORT
 from logger import logger
 from core.database import get_all_signals
 import logging as _logging
 _logging.getLogger("werkzeug").setLevel(_logging.ERROR)
 
 app = Flask(__name__)
+sock = Sock(app)
 _engine = None
 
 def set_engine(engine):
@@ -41,46 +42,46 @@ def api_signals():
     market = request.args.get("market", None)
     return jsonify(get_all_signals(market=market))
 
+# ── WebSocket (same port as HTTP) ────────────────────────────
+_clients = {}          # ws -> queue.Queue
+_clients_lock = threading.Lock()
+
+@sock.route("/ws")
+def ws_handler(ws):
+    import queue
+    q = queue.Queue()
+    with _clients_lock:
+        _clients[ws] = q
+    try:
+        while True:
+            payload = q.get()          # blocks until broadcaster pushes something
+            if payload is None:        # sentinel for shutdown/disconnect
+                break
+            ws.send(payload)
+    except Exception:
+        pass
+    finally:
+        with _clients_lock:
+            _clients.pop(ws, None)
+
+def broadcast_loop():
+    while True:
+        time.sleep(2)
+        if _engine is None:
+            continue
+        with _clients_lock:
+            if not _clients:
+                continue
+            payload = json.dumps(_engine.get_rows())
+            for q in list(_clients.values()):
+                q.put(payload)
+
 # ── Flask thread ──────────────────────────────────────────────
 def run_flask():
-    logger.info(f"Dashboard → http://{HTTP_HOST}:{HTTP_PORT}")
-    app.run(host=HTTP_HOST, port=HTTP_PORT, debug=False, use_reloader=False)
+    logger.info(f"Dashboard + WS → http://{HTTP_HOST}:{HTTP_PORT}")
+    app.run(host=HTTP_HOST, port=HTTP_PORT, debug=False, use_reloader=False, threaded=True)
 
-# ── WebSocket broadcast ───────────────────────────────────────
-_clients = set()
-
-async def ws_handler(websocket):
-    global _clients
-    _clients.add(websocket)
-    try:
-        await websocket.wait_closed()
-    finally:
-        _clients.discard(websocket)
-
-async def broadcast_loop():
-    global _clients
-    while True:
-        await asyncio.sleep(2)
-        if not _clients or _engine is None:
-            continue
-        payload = json.dumps(_engine.get_rows())
-        dead = set()
-        for ws in list(_clients):
-            try:
-                await ws.send(payload)
-            except Exception:
-                dead.add(ws)
-        _clients -= dead
-
-async def ws_main():
-    async with websockets.serve(ws_handler, WS_HOST, WS_PORT):
-        logger.info(f"WebSocket → ws://{WS_HOST}:{WS_PORT}")
-        await broadcast_loop()
-
-def run_websocket():
-    asyncio.run(ws_main())
-
-# ── Start both servers ────────────────────────────────────────
+# ── Start servers ────────────────────────────────────────────
 def start_servers():
-    threading.Thread(target=run_flask,     daemon=True).start()
-    threading.Thread(target=run_websocket, daemon=True).start()
+    threading.Thread(target=run_flask,       daemon=True).start()
+    threading.Thread(target=broadcast_loop,  daemon=True).start()
