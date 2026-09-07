@@ -121,8 +121,8 @@ ML_BACKTEST_TEST_FRACTION = 0.2
 # ── Server ────────────────────────────────────────────────────
 HTTP_PORT   = 5000
 WS_PORT     = 8765
-HTTP_HOST   = "127.0.0.1"
-WS_HOST     = "127.0.0.1"
+HTTP_HOST   = "0.0.0.0"
+WS_HOST     = "0.0.0.0"
 TELEGRAM_ACCEPT_ONLY = True   # False = send all signals including AVOID/Learning
 # ── Data ──────────────────────────────────────────────────────
 TICK_STORE_MINUTES  = 120
