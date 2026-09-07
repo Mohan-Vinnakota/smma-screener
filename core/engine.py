@@ -24,14 +24,14 @@ from logger import logger
 from config import ML_MIN_SAMPLES
 
 # ── Credentials ───────────────────────────────────────────────
-with open("credentials.json") as f:
-    creds = json.load(f)
+import os
+_raw = os.environ.get("CREDENTIALS_JSON")
+creds = json.loads(_raw) if _raw else json.load(open("credentials.json"))
 
 API_KEY   = creds["api_key"]
 CLIENT_ID = creds["client_id"]
 PASSWORD  = creds["password"]
 TOTP_KEY  = creds["totp_key"]
-
 
 class Engine:
     """

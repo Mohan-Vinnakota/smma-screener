@@ -1,9 +1,10 @@
 import requests
 import json
+import os
 from config import TELEGRAM_ACCEPT_ONLY
 
-with open("credentials.json") as f:
-    creds = json.load(f)
+_raw = os.environ.get("CREDENTIALS_JSON")
+creds = json.loads(_raw) if _raw else json.load(open("credentials.json"))
 
 TOKEN   = creds["telegram_token"]
 CHAT_ID = creds["telegram_chat"]

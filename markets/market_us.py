@@ -39,8 +39,9 @@ from alerts.telegram_alert import send_alert, format_signal_alert
 MARKET = "US"
 US_EASTERN = ZoneInfo("America/New_York")
 
-with open("credentials.json") as f:
-    _creds = json.load(f)
+import os
+_raw = os.environ.get("CREDENTIALS_JSON")
+_creds = json.loads(_raw) if _raw else json.load(open("credentials.json"))
 
 ALPACA_KEY    = _creds.get("alpaca_api_key")
 ALPACA_SECRET = _creds.get("alpaca_api_secret")
